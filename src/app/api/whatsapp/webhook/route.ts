@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+ import { NextRequest } from "next/server";
   import Anthropic from "@anthropic-ai/sdk";
   import twilio from "twilio";
 
@@ -9,14 +9,11 @@ import { NextRequest } from "next/server";
 
   const SYSTEM_PROMPT = `You are Qra, a helpful AI assistant for Indian exporters. Respond briefly and
   helpfully in 1-3 sentences.`;
-   Do not promise specific compliance outcomes; the customer must verify all documentation.";
 
   const MAX_INPUT_LENGTH = 1000;
   const RATE_LIMIT_MAX = 10;
   const RATE_LIMIT_WINDOW_MS = 60_000;
 
-  // NOTE: in-memory rate limiter is best-effort only on Vercel serverless
-  // (each instance has its own Map). Replace with Upstash Redis before public launch.
   const rateLimitBuckets = new Map<string, number[]>();
 
   function isRateLimited(sender: string): boolean {
