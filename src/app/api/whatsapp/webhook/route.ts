@@ -7,8 +7,8 @@ import { NextRequest } from "next/server";
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const SYSTEM_PROMPT =
-    "You are Qra, a helpful AI assistant for Indian exporters. Respond briefly and helpfully in 1-3 sentences.
+  const SYSTEM_PROMPT = `You are Qra, a helpful AI assistant for Indian exporters. Respond briefly and
+  helpfully in 1-3 sentences.`;
    Do not promise specific compliance outcomes; the customer must verify all documentation.";
 
   const MAX_INPUT_LENGTH = 1000;
