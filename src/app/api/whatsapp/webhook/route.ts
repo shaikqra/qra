@@ -83,8 +83,8 @@ function generateShipmentReference(): string {
 }
 
 async function downloadTwilioMedia(url: string): Promise<{ bytes: Buffer; contentType: string } | null> {
-  const sid = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
+  const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
+  const token = process.env.TWILIO_AUTH_TOKEN?.trim();
   if (!sid || !token) {
     console.error("media_download_failed", { stage: "env_missing", hasSid: !!sid, hasToken: !!token });
     return null;
@@ -219,8 +219,8 @@ async function handlePOSubmission({
 }
 
 export async function POST(req: NextRequest) {
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const webhookUrl = process.env.TWILIO_WEBHOOK_URL;
+  const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
+  const webhookUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
 
   if (!authToken || !webhookUrl) {
     return new Response("Server misconfigured", { status: 500 });
