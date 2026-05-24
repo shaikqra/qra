@@ -1,6 +1,7 @@
 ﻿import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import twilio from "twilio";
+import { createHash, randomBytes } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hashPhone } from "@/lib/hash";
 
@@ -12,6 +13,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SYSTEM_PROMPT = `You are Qra, a helpful AI assistant for Indian exporters. Respond briefly and helpfully in 1-3 sentences.`;
 
 const MAX_INPUT_LENGTH = 1000;
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
@@ -44,7 +46,7 @@ function twimlResponse(message: string): Response {
   });
 }
 
-async function lookupOrCreateCustomer(phoneHash: string): Promise<void> {
+async function getOrCreateCustomer(phoneHash: string): Promise<string | null> {
   try {
     const supabase = createSupabaseServerClient();
     const { data: existing } = await supabase
@@ -52,15 +54,128 @@ async function lookupOrCreateCustomer(phoneHash: string): Promise<void> {
       .select("id")
       .eq("phone_hash", phoneHash)
       .maybeSingle();
-
-    if (existing) return;
-
-    await supabase.from("customers").insert({ phone_hash: phoneHash });
+    if (existing) return existing.id as string;
+    const { data: inserted, error } = await supabase
+      .from("customers")
+      .insert({ phone_hash: phoneHash })
+      .select("id")
+      .single();
+    if (error || !inserted) return null;
+    return inserted.id as string;
   } catch (err) {
     console.error("customer_lookup_failed", {
       name: err instanceof Error ? err.name : "unknown",
     });
+    return null;
   }
+}
+
+function generateShipmentReference(): string {
+  const today = new Date();
+  const yyyymmdd = today.toISOString().slice(0, 10).replace(/-/g, "");
+  const suffix = randomBytes(3).toString("hex").toUpperCase();
+  return `SHP-${yyyymmdd}-${suffix}`;
+}
+
+async function downloadTwilioMedia(url: string): Promise<{ bytes: Buffer; contentType: string } | null> {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token) return null;
+  const authHeader = "Basic " + Buffer.from(`${sid}:${token}`).toString("base64");
+  try {
+    const res = await fetch(url, { headers: { Authorization: authHeader } });
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type") ?? "application/octet-stream";
+    const arrayBuffer = await res.arrayBuffer();
+    const bytes = Buffer.from(arrayBuffer);
+    if (bytes.length > MAX_FILE_SIZE_BYTES) return null;
+    return { bytes, contentType };
+  } catch (err) {
+    console.error("twilio_media_download_failed", {
+      name: err instanceof Error ? err.name : "unknown",
+    });
+    return null;
+  }
+}
+
+function extensionFromContentType(ct: string): string {
+  if (ct.includes("pdf")) return "pdf";
+  if (ct.includes("jpeg") || ct.includes("jpg")) return "jpg";
+  if (ct.includes("png")) return "png";
+  if (ct.includes("ogg") || ct.includes("opus")) return "ogg";
+  if (ct.includes("mp3") || ct.includes("mpeg")) return "mp3";
+  return "bin";
+}
+
+async function handlePOSubmission({
+  customerId,
+  mediaUrls,
+  messageBody,
+}: {
+  customerId: string;
+  mediaUrls: string[];
+  messageBody: string;
+}): Promise<{ shipmentRef: string; fileCount: number } | null> {
+  const supabase = createSupabaseServerClient();
+  const shipmentRef = generateShipmentReference();
+
+  const { data: shipment, error: shipErr } = await supabase
+    .from("shipments")
+    .insert({
+      customer_id: customerId,
+      reference_number: shipmentRef,
+      customer_po_number: messageBody.slice(0, 100) || null,
+      status: "po_received",
+    })
+    .select("id")
+    .single();
+
+  if (shipErr || !shipment) {
+    console.error("shipment_create_failed", { name: shipErr?.code ?? "unknown" });
+    return null;
+  }
+
+  const shipmentId = shipment.id as string;
+  let storedCount = 0;
+
+  for (let i = 0; i < mediaUrls.length; i++) {
+    const url = mediaUrls[i];
+    if (!url) continue;
+    const media = await downloadTwilioMedia(url);
+    if (!media) continue;
+
+    const sha256 = createHash("sha256").update(media.bytes).digest("hex");
+    const ext = extensionFromContentType(media.contentType);
+    const storagePath = `${customerId}/${shipmentId}/${sha256.slice(0, 16)}-${i}.${ext}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from("purchase-orders")
+      .upload(storagePath, media.bytes, {
+        contentType: media.contentType,
+        upsert: false,
+      });
+
+    if (uploadErr) {
+      console.error("storage_upload_failed", { name: uploadErr.name ?? "unknown" });
+      continue;
+    }
+
+    const { error: auditErr } = await supabase.from("audit_po_ingest").insert({
+      customer_id: customerId,
+      shipment_id: shipmentId,
+      storage_path: storagePath,
+      file_sha256: sha256,
+      source: "whatsapp",
+    });
+
+    if (auditErr) {
+      console.error("audit_log_failed", { name: auditErr.code ?? "unknown" });
+    }
+
+    storedCount++;
+  }
+
+  return { shipmentRef, fileCount: storedCount };
 }
 
 export async function POST(req: NextRequest) {
@@ -82,8 +197,9 @@ export async function POST(req: NextRequest) {
 
   const from = params.From ?? "";
   const body = (params.Body ?? "").trim();
+  const numMedia = parseInt(params.NumMedia ?? "0", 10);
 
-  if (!from || !body) {
+  if (!from) {
     return twimlResponse("Sorry, I couldn't read your message. Please try again.");
   }
 
@@ -95,7 +211,38 @@ export async function POST(req: NextRequest) {
     return twimlResponse("You're sending messages too fast. Please wait a minute and try again.");
   }
 
-  await lookupOrCreateCustomer(hashPhone(from));
+  const phoneHash = hashPhone(from);
+  const customerId = await getOrCreateCustomer(phoneHash);
+
+  if (!customerId) {
+    return twimlResponse("Sorry, I'm having trouble setting up your profile. Please try again.");
+  }
+
+  if (numMedia > 0) {
+    const mediaUrls: string[] = [];
+    for (let i = 0; i < numMedia; i++) {
+      const url = params[`MediaUrl${i}`];
+      if (url) mediaUrls.push(url);
+    }
+
+    const result = await handlePOSubmission({
+      customerId,
+      mediaUrls,
+      messageBody: body,
+    });
+
+    if (!result) {
+      return twimlResponse("I received your file but had trouble storing it. Please try sending again.");
+    }
+
+    return twimlResponse(
+      `Got your PO! Saved ${result.fileCount} file(s). Shipment reference: ${result.shipmentRef}. Processing now.`
+    );
+  }
+
+  if (!body) {
+    return twimlResponse("Sorry, I couldn't read your message. Please try again.");
+  }
 
   try {
     const result = await anthropic.messages.create({
