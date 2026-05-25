@@ -19,10 +19,17 @@ const FIELDS: { key: string; label: string; placeholder: string }[] = [
 
 const STATUS_OPTIONS = [
   { value: "po_received", label: "PO received" },
-  { value: "fields_extracted", label: "Fields extracted" },
-  { value: "docs_generated", label: "Docs generated" },
-  { value: "approved", label: "Approved" },
-  { value: "sent", label: "Sent" },
+  { value: "data_extracting", label: "Data extracting" },
+  { value: "awaiting_customer_info", label: "Awaiting customer info" },
+  { value: "generating_documents", label: "Generating documents" },
+  { value: "sanctions_screening", label: "Sanctions screening" },
+  { value: "bucket_b_review", label: "Bucket B review" },
+  { value: "awaiting_customer_approval", label: "Awaiting customer approval" },
+  { value: "filed_with_cha", label: "Filed with CHA" },
+  { value: "customs_cleared", label: "Customs cleared" },
+  { value: "in_transit", label: "In transit" },
+  { value: "delivered", label: "Delivered" },
+  { value: "completed", label: "Completed" },
   { value: "rejected", label: "Rejected" },
 ];
 

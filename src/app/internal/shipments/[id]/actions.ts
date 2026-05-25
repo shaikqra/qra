@@ -14,10 +14,17 @@ type ActionResult = { ok: true } | { ok: false; error: string };
 
 const ALLOWED_STATUSES = [
   "po_received",
-  "fields_extracted",
-  "docs_generated",
-  "approved",
-  "sent",
+  "data_extracting",
+  "awaiting_customer_info",
+  "generating_documents",
+  "sanctions_screening",
+  "bucket_b_review",
+  "awaiting_customer_approval",
+  "filed_with_cha",
+  "customs_cleared",
+  "in_transit",
+  "delivered",
+  "completed",
   "rejected",
 ];
 
