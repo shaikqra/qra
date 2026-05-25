@@ -83,15 +83,32 @@ function generateShipmentReference(): string {
 }
 
 async function downloadTwilioMedia(url: string): Promise<{ bytes: Buffer; contentType: string } | null> {
-  const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
+  const envSid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const token = process.env.TWILIO_AUTH_TOKEN?.trim();
-  if (!sid || !token) {
-    console.error("media_download_failed", { stage: "env_missing", hasSid: !!sid, hasToken: !!token });
+  if (!token) {
+    console.error("media_download_failed", { stage: "env_missing", hasToken: false });
     return null;
+  }
+  const sidMatch = url.match(/\/Accounts\/(AC[0-9a-fA-F]{32})\//);
+  const urlSid = sidMatch?.[1];
+  const sid = urlSid ?? envSid;
+  if (!sid) {
+    console.error("media_download_failed", { stage: "no_sid_available", hasEnvSid: !!envSid, hasUrlSid: false });
+    return null;
+  }
+  if (envSid && urlSid && envSid !== urlSid) {
+    console.warn("media_sid_mismatch", {
+      envSidPrefix: envSid.slice(0, 8),
+      urlSidPrefix: urlSid.slice(0, 8),
+    });
   }
   const authHeader = "Basic " + Buffer.from(`${sid}:${token}`).toString("base64");
   try {
-    console.log("media_download_start", { urlPrefix: url.slice(0, 100) });
+    console.log("media_download_start", {
+      urlPrefix: url.slice(0, 120),
+      sidSource: urlSid ? "url" : "env",
+      sidPrefix: sid.slice(0, 8),
+    });
     const res = await fetch(url, { headers: { Authorization: authHeader } });
     console.log("media_download_response", { status: res.status, ok: res.ok, contentType:
   res.headers.get("content-type") });
