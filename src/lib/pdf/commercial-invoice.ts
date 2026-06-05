@@ -28,6 +28,35 @@ const INK = rgb(0.1, 0.1, 0.1);
 const GREY = rgb(0.45, 0.45, 0.45);
 const LINE = rgb(0.8, 0.8, 0.8);
 
+// The standard PDF font only speaks WinAnsi (Latin-1 / CP1252). Real PO data is
+// full of Unicode it can't render — smart quotes, dashes, box-drawing chars from
+// copied tables — so map the common ones to plain equivalents and drop the rest.
+// Latin-1 accents (ü, é, ñ…) are kept, which covers the EU/CBAM wedge.
+const PUNCT_MAP: Record<string, string> = {
+  "‘": "'", "’": "'", "‚": "'", "‛": "'",
+  "“": '"', "”": '"', "„": '"',
+  "–": "-", "—": "-", "−": "-", "‐": "-", "‑": "-",
+  "…": "...", " ": " ", " ": " ", " ": " ",
+  "•": "-", "·": "-", "│": "|", "─": "-", "┃": "|",
+};
+
+function toWinAnsi(s: string): string {
+  if (!s) return "";
+  let out = "";
+  for (const ch of s) {
+    if (PUNCT_MAP[ch]) {
+      out += PUNCT_MAP[ch];
+      continue;
+    }
+    const code = ch.codePointAt(0) ?? 0;
+    if (code === 0x09 || code === 0x0a) out += " ";          // tabs/newlines → space
+    else if (code >= 0x20 && code <= 0x7e) out += ch;        // printable ASCII
+    else if (code >= 0xa0 && code <= 0xff) out += ch;        // Latin-1 (accents)
+    // anything else the font can't render is dropped
+  }
+  return out;
+}
+
 export async function buildCommercialInvoicePdf(
   data: CommercialInvoiceData
 ): Promise<Uint8Array> {
@@ -40,17 +69,19 @@ export async function buildCommercialInvoicePdf(
 
   // --- small drawing helpers -------------------------------------------------
   const draw = (s: string, x: number, yy: number, size = 10, f = font, color = INK) =>
-    page.drawText(s || "", { x, y: yy, size, font: f, color });
+    page.drawText(toWinAnsi(s), { x, y: yy, size, font: f, color });
 
-  const drawRight = (s: string, xRight: number, yy: number, size = 10, f = font, color = INK) =>
-    draw(s, xRight - f.widthOfTextAtSize(s || "", size), yy, size, f, color);
+  const drawRight = (s: string, xRight: number, yy: number, size = 10, f = font, color = INK) => {
+    const t = toWinAnsi(s);
+    draw(t, xRight - f.widthOfTextAtSize(t, size), yy, size, f, color);
+  };
 
   const rule = (yy: number) =>
     page.drawLine({ start: { x: MARGIN, y: yy }, end: { x: RIGHT, y: yy }, thickness: 0.75, color: LINE });
 
   // Wrap text to a max width, returning the lines.
   const wrap = (s: string, f: PDFFont, size: number, maxWidth: number): string[] => {
-    const words = (s || "").split(/\s+/).filter(Boolean);
+    const words = toWinAnsi(s).split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let line = "";
     for (const w of words) {
