@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { generateCommercialInvoice } from "./generate-invoice";
+import { generatePackingList } from "./generate-packing-list";
 
 type GeneratedDoc = {
   id: string;
@@ -29,12 +30,17 @@ export function InvoicePanel({
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
-  function handleGenerate() {
+  type GenResult = { ok: true; downloadUrl: string } | { ok: false; error: string };
+
+  function handleGenerate(
+    label: string,
+    action: (id: string) => Promise<GenResult>
+  ) {
     setMessage(null);
     startTransition(async () => {
-      const result = await generateCommercialInvoice(shipmentId);
+      const result = await action(shipmentId);
       if (result.ok) {
-        setMessage({ ok: true, text: "Commercial invoice generated." });
+        setMessage({ ok: true, text: `${label} generated.` });
         if (result.downloadUrl) window.open(result.downloadUrl, "_blank");
         router.refresh();
       } else {
@@ -45,14 +51,22 @@ export function InvoicePanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={handleGenerate}
+          onClick={() => handleGenerate("Commercial invoice", generateCommercialInvoice)}
           disabled={pending}
           className="rounded-md bg-zinc-900 px-5 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
         >
           {pending ? "Generating…" : "Generate Commercial Invoice"}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleGenerate("Packing list", generatePackingList)}
+          disabled={pending}
+          className="rounded-md border border-zinc-300 bg-white px-5 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          {pending ? "Generating…" : "Generate Packing List"}
         </button>
         {message && (
           <span className={`text-sm ${message.ok ? "text-emerald-700" : "text-red-600"}`}>

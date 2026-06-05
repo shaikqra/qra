@@ -15,6 +15,11 @@ const FIELDS: { key: string; label: string; placeholder: string }[] = [
   { key: "value_amount", label: "Invoice value", placeholder: "Amount" },
   { key: "value_currency", label: "Currency", placeholder: "USD, EUR, INR" },
   { key: "incoterm", label: "Incoterm", placeholder: "FOB, CIF, EXW" },
+  { key: "number_of_packages", label: "No. of packages", placeholder: "e.g. 500" },
+  { key: "package_type", label: "Package type", placeholder: "bags, cartons, pallets" },
+  { key: "net_weight", label: "Net weight", placeholder: "Total net" },
+  { key: "gross_weight", label: "Gross weight", placeholder: "Total gross" },
+  { key: "weight_unit", label: "Weight unit", placeholder: "kg, MT" },
 ];
 
 const STATUS_OPTIONS = [
