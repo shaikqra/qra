@@ -19,6 +19,18 @@ const DEMO_SELLER = {
 type Result = { ok: true; downloadUrl: string } | { ok: false; error: string };
 
 export async function generateCommercialInvoice(shipmentId: string): Promise<Result> {
+  try {
+    return await runGeneration(shipmentId);
+  } catch (e) {
+    // Never let a failure white-screen the operator. Log the cause for us
+    // (message only — never the customer data) and return a clean message.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("generateCommercialInvoice failed:", msg);
+    return { ok: false, error: `Generation failed: ${msg}` };
+  }
+}
+
+async function runGeneration(shipmentId: string): Promise<Result> {
   const session = await getOperatorSession();
   if (!session) return { ok: false, error: "Not authorized" };
 
@@ -78,7 +90,7 @@ export async function generateCommercialInvoice(shipmentId: string): Promise<Res
   const { error: upErr } = await admin.storage
     .from("generated-docs")
     .upload(storagePath, buffer, { contentType: "application/pdf", upsert: false });
-  if (upErr) return { ok: false, error: "Could not save the generated file" };
+  if (upErr) return { ok: false, error: `Upload failed: ${upErr.message}` };
 
   const { error: insErr } = await admin.from("generated_documents").insert({
     shipment_id: shipmentId,
@@ -93,7 +105,7 @@ export async function generateCommercialInvoice(shipmentId: string): Promise<Res
   if (insErr) {
     // Keep storage and audit in sync: undo the upload if the audit row failed.
     await admin.storage.from("generated-docs").remove([storagePath]);
-    return { ok: false, error: "Could not record the document" };
+    return { ok: false, error: `Record failed: ${insErr.message}` };
   }
 
   const { data: signed } = await admin.storage
