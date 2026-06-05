@@ -4,6 +4,7 @@ import { ensureOperator } from "../../layout";
 import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ExtractionForm } from "./extraction-form";
+import { InvoicePanel } from "./invoice-panel";
 
 type Shipment = {
   id: string;
@@ -30,6 +31,14 @@ type AuditRow = {
   old_value: unknown;
   new_value: unknown;
   created_at: string;
+};
+
+type GeneratedDocRow = {
+  id: string;
+  doc_type: string;
+  storage_path: string;
+  output_sha256: string;
+  generated_at: string;
 };
 
 export default async function ShipmentDetailPage({
@@ -80,6 +89,27 @@ export default async function ShipmentDetailPage({
     .limit(20);
 
   const auditTrail = (auditRows ?? []) as AuditRow[];
+
+  const { data: genRows } = await supabase
+    .from("generated_documents")
+    .select("id, doc_type, storage_path, output_sha256, generated_at")
+    .eq("shipment_id", id)
+    .order("generated_at", { ascending: false });
+
+  const generatedDocs = await Promise.all(
+    ((genRows ?? []) as GeneratedDocRow[]).map(async (g) => {
+      const { data } = await admin.storage
+        .from("generated-docs")
+        .createSignedUrl(g.storage_path, 60 * 10);
+      return {
+        id: g.id,
+        doc_type: g.doc_type,
+        output_sha256: g.output_sha256,
+        generated_at: g.generated_at,
+        url: data?.signedUrl ?? null,
+      };
+    })
+  );
 
   return (
     <div className="flex flex-col gap-8">
@@ -175,6 +205,13 @@ export default async function ShipmentDetailPage({
           />
         </section>
       </div>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
+          Documents
+        </h2>
+        <InvoicePanel shipmentId={ship.id} docs={generatedDocs} />
+      </section>
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
