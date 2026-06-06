@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveShipmentExtraction } from "./actions";
+import { extractShipmentFields } from "./extract-action";
 
 const FIELDS: { key: string; label: string; placeholder: string }[] = [
   { key: "buyer_name", label: "Buyer name", placeholder: "e.g. Müller GmbH" },
@@ -61,6 +62,28 @@ export function ExtractionForm({
   const [status, setStatus] = useState(initialStatus);
   const [notes, setNotes] = useState(initialNotes);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [extractPending, startExtract] = useTransition();
+  const [extractMsg, setExtractMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function handleExtract() {
+    setExtractMsg(null);
+    startExtract(async () => {
+      const result = await extractShipmentFields(shipmentId);
+      if (result.ok) {
+        // Fill in what the AI found; keep any value the AI left blank.
+        setExtracted((prev) => {
+          const next = { ...prev };
+          for (const [k, v] of Object.entries(result.fields)) {
+            if (v) next[k] = v;
+          }
+          return next;
+        });
+        setExtractMsg({ ok: true, text: "Filled from PO — review, then Save." });
+      } else {
+        setExtractMsg({ ok: false, text: result.error });
+      }
+    });
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -84,9 +107,24 @@ export function ExtractionForm({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
       <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-          Extracted fields
-        </h2>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            Extracted fields
+          </h2>
+          <button
+            type="button"
+            onClick={handleExtract}
+            disabled={extractPending}
+            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            {extractPending ? "Reading PO…" : "✨ Extract with AI"}
+          </button>
+          {extractMsg && (
+            <span className={`text-xs ${extractMsg.ok ? "text-emerald-700" : "text-red-600"}`}>
+              {extractMsg.text}
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {FIELDS.map((f) => (
             <label key={f.key} className="flex flex-col gap-1 text-sm">
