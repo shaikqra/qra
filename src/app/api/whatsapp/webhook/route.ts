@@ -52,18 +52,27 @@ function twimlResponse(message: string): Response {
   });
 }
 
-async function getOrCreateCustomer(phoneHash: string): Promise<string | null> {
+async function getOrCreateCustomer(phoneHash: string, whatsappNumber: string): Promise<string | null> {
   try {
     const supabase = createSupabaseServerClient();
     const { data: existing } = await supabase
       .from("customers")
-      .select("id")
+      .select("id, whatsapp_number")
       .eq("phone_hash", phoneHash)
       .maybeSingle();
-    if (existing) return existing.id as string;
+    if (existing) {
+      // Backfill the number for customers created before we stored it.
+      if (!existing.whatsapp_number) {
+        await supabase
+          .from("customers")
+          .update({ whatsapp_number: whatsappNumber })
+          .eq("id", existing.id);
+      }
+      return existing.id as string;
+    }
     const { data: inserted, error } = await supabase
       .from("customers")
-      .insert({ phone_hash: phoneHash })
+      .insert({ phone_hash: phoneHash, whatsapp_number: whatsappNumber })
       .select("id")
       .single();
     if (error || !inserted) {
@@ -301,7 +310,7 @@ export async function POST(req: NextRequest) {
   }
 
   const phoneHash = hashPhone(from);
-  const customerId = await getOrCreateCustomer(phoneHash);
+  const customerId = await getOrCreateCustomer(phoneHash, from);
 
   if (!customerId) {
     return twimlResponse("Sorry, I'm having trouble setting up your profile. Please try again.");
