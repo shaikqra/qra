@@ -6,15 +6,7 @@ import { getOperatorSession } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildCommercialInvoicePdf } from "@/lib/pdf/commercial-invoice";
 
-const GENERATOR = "pdf-lib / commercial-invoice@v1";
-
-// Fallback exporter for the demo, so the invoice is never blank when the
-// seller fields haven't been filled. Real exporter profiles come later.
-const DEMO_SELLER = {
-  name: "NAVA-MGE Exports",
-  address: "Hyderabad, Telangana, India",
-  iec: "",
-};
+const GENERATOR = "pdf-lib / commercial-invoice@v2";
 
 type Result = { ok: true; downloadUrl: string } | { ok: false; error: string };
 
@@ -22,8 +14,6 @@ export async function generateCommercialInvoice(shipmentId: string): Promise<Res
   try {
     return await runGeneration(shipmentId);
   } catch (e) {
-    // Never let a failure white-screen the operator. Log the cause for us
-    // (message only — never the customer data) and return a clean message.
     const msg = e instanceof Error ? e.message : String(e);
     console.error("generateCommercialInvoice failed:", msg);
     return { ok: false, error: `Generation failed: ${msg}` };
@@ -45,9 +35,8 @@ async function runGeneration(shipmentId: string): Promise<Result> {
   if (error || !shipment) return { ok: false, error: "Shipment not found" };
 
   const d = (shipment.extracted_data ?? {}) as Record<string, string>;
+  const get = (k: string) => (d[k] ?? "").trim();
 
-  // A commercial invoice legally needs at least these. Block generation and
-  // tell the operator exactly what's missing, rather than emit a broken doc.
   const required: [string, string][] = [
     ["buyer_name", "Buyer name"],
     ["product_description", "Product description"],
@@ -55,10 +44,18 @@ async function runGeneration(shipmentId: string): Promise<Result> {
     ["value_amount", "Invoice value"],
     ["value_currency", "Currency"],
   ];
-  const missing = required.filter(([k]) => !(d[k] ?? "").trim()).map(([, label]) => label);
+  const missing = required.filter(([k]) => !get(k)).map(([, label]) => label);
   if (missing.length > 0) {
     return { ok: false, error: `Fill these fields first: ${missing.join(", ")}` };
   }
+
+  // Exporter profile holds the static identity / bank / declarations.
+  const { data: profile } = await admin
+    .from("exporter_profiles")
+    .select("*")
+    .eq("is_default", true)
+    .maybeSingle();
+  const p = (profile ?? {}) as Record<string, string>;
 
   const pdfBytes = await buildCommercialInvoicePdf({
     invoiceNumber: `CI-${shipment.reference_number}`,
@@ -68,19 +65,45 @@ async function runGeneration(shipmentId: string): Promise<Result> {
       year: "numeric",
     }),
     seller: {
-      name: (d.seller_name ?? "").trim() || DEMO_SELLER.name,
-      address: (d.seller_address ?? "").trim() || DEMO_SELLER.address,
-      iec: (d.seller_iec ?? "").trim() || DEMO_SELLER.iec,
+      name: (p.legal_name ?? "").trim() || "[Exporter — set in Settings]",
+      address: (p.address ?? "").trim(),
+      factoryAddress: (p.factory_address ?? "").trim() || undefined,
+      iec: (p.iec ?? "").trim() || undefined,
+      gstin: (p.gstin ?? "").trim() || undefined,
+      cin: (p.cin ?? "").trim() || undefined,
+      organicCode: (p.organic_code ?? "").trim() || undefined,
     },
-    buyer: { name: d.buyer_name.trim(), address: (d.buyer_address ?? "").trim() },
-    destinationCountry: (d.destination_country ?? "").trim(),
-    incoterm: (d.incoterm ?? "").trim(),
-    currency: d.value_currency.trim(),
-    hsCode: (d.hs_code ?? "").trim(),
-    productDescription: d.product_description.trim(),
-    quantity: d.quantity.trim(),
-    unit: (d.quantity_unit ?? "").trim(),
-    totalAmount: d.value_amount.trim(),
+    buyer: { name: get("buyer_name"), address: get("buyer_address") },
+    destinationCountry: get("destination_country"),
+    incoterm: get("incoterm") || (p.default_incoterm ?? "").trim(),
+    currency: get("value_currency") || (p.default_currency ?? "").trim(),
+    portOfLoading: get("port_of_loading") || undefined,
+    portOfDischarge: get("port_of_discharge") || undefined,
+    vessel: get("vessel_name") || undefined,
+    containerNo: get("container_no") || undefined,
+    sealNo: get("seal_no") || undefined,
+    hsCode: get("hs_code"),
+    productDescription: get("product_description"),
+    quantity: get("quantity"),
+    unit: get("quantity_unit"),
+    totalAmount: get("value_amount"),
+    batchCode: get("batch_code") || undefined,
+    lotCode: get("lot_code") || undefined,
+    netWeight: get("net_weight") ? `${get("net_weight")} ${get("weight_unit")}`.trim() : undefined,
+    grossWeight: get("gross_weight") ? `${get("gross_weight")} ${get("weight_unit")}`.trim() : undefined,
+    numberOfPackages: get("number_of_packages") || undefined,
+    bank: {
+      name: (p.bank_name ?? "").trim() || undefined,
+      branch: (p.bank_branch ?? "").trim() || undefined,
+      swift: (p.bank_swift ?? "").trim() || undefined,
+      account: (p.bank_account ?? "").trim() || undefined,
+      beneficiary: (p.bank_beneficiary ?? "").trim() || undefined,
+    },
+    declarations: {
+      lut: (p.declaration_lut ?? "").trim() || undefined,
+      rodtep: (p.declaration_rodtep ?? "").trim() || undefined,
+      origin: (p.declaration_origin ?? "").trim() || undefined,
+    },
   });
 
   const buffer = Buffer.from(pdfBytes);
@@ -103,7 +126,6 @@ async function runGeneration(shipmentId: string): Promise<Result> {
     generated_by: session.userId,
   });
   if (insErr) {
-    // Keep storage and audit in sync: undo the upload if the audit row failed.
     await admin.storage.from("generated-docs").remove([storagePath]);
     return { ok: false, error: `Record failed: ${insErr.message}` };
   }
