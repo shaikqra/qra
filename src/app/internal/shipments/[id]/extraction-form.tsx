@@ -21,6 +21,13 @@ const FIELDS: { key: string; label: string; placeholder: string }[] = [
   { key: "net_weight", label: "Net weight", placeholder: "Total net" },
   { key: "gross_weight", label: "Gross weight", placeholder: "Total gross" },
   { key: "weight_unit", label: "Weight unit", placeholder: "kg, MT" },
+  { key: "port_of_loading", label: "Port of loading", placeholder: "e.g. Chennai" },
+  { key: "port_of_discharge", label: "Port of discharge", placeholder: "e.g. Rotterdam" },
+  { key: "vessel_name", label: "Vessel name", placeholder: "Vessel / voyage" },
+  { key: "container_no", label: "Container no.", placeholder: "Container number" },
+  { key: "seal_no", label: "Seal no.", placeholder: "Seal number" },
+  { key: "batch_code", label: "Batch code", placeholder: "Batch / production code" },
+  { key: "lot_code", label: "Lot code", placeholder: "Lot number" },
 ];
 
 const STATUS_OPTIONS = [
