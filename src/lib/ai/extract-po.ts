@@ -28,7 +28,7 @@ export type SupportedMediaType =
 const SYSTEM_PROMPT = `You read a buyer's purchase order for an Indian export shipment and extract structured fields.
 
 Rules:
-- Extract ONLY what is clearly present in the document. If a field is not stated, return an empty string for it. Never guess or invent values.
+- Extract ONLY what is clearly present in the document. If a field is not stated, return an empty string "" for it. Do NOT write "UNKNOWN", "N/A", "-", "not stated", or any other placeholder — use a literal empty string. Never guess or invent values.
 - Do NOT fabricate an HS code. Only fill hs_code if an HS/HSN/tariff code is explicitly written on the document.
 - value_amount: the total order value as a plain number, digits only (no currency symbol, no commas). If only a unit price is shown, leave value_amount empty.
 - value_currency: a 3-letter ISO code (USD, EUR, INR, AED, GBP).
@@ -91,11 +91,15 @@ export async function extractPoFields(
   );
   const raw = (toolUse?.input ?? {}) as Record<string, unknown>;
 
-  // Normalise: guarantee every key exists as a trimmed string.
+  // Some models write a placeholder instead of an empty string when a field is
+  // missing. Treat any "no data" marker as blank so it never pollutes the form.
+  const NO_DATA = /^(<?\s*unknown\s*>?|n\/?a|none|null|nil|not\s+(stated|available|specified|mentioned|provided|found)|tbd|[-—.]+)$/i;
+
   const fields = {} as PoFields;
   for (const key of PO_FIELD_KEYS) {
     const v = raw[key];
-    fields[key] = typeof v === "string" ? v.trim() : "";
+    const cleaned = typeof v === "string" ? v.trim() : "";
+    fields[key] = NO_DATA.test(cleaned) ? "" : cleaned;
   }
   return fields;
 }
