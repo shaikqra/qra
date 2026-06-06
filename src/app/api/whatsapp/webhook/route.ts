@@ -1,12 +1,17 @@
-﻿import { NextRequest } from "next/server";
+﻿import { NextRequest, after } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import twilio from "twilio";
 import { createHash, randomBytes } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hashPhone } from "@/lib/hash";
+import { runAutoPipeline } from "@/lib/docs/auto-pipeline";
+import type { SupportedMediaType } from "@/lib/ai/extract-po";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// The auto-pipeline (AI extraction + doc generation) keeps running after the
+// webhook reply is sent; give the function room to finish.
+export const maxDuration = 60;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -156,7 +161,12 @@ async function handlePOSubmission({
   customerId: string;
   mediaUrls: string[];
   messageBody: string;
-}): Promise<{ shipmentRef: string; fileCount: number } | null> {
+}): Promise<{
+  shipmentRef: string;
+  fileCount: number;
+  shipmentId: string;
+  firstReadable: { base64: string; mediaType: SupportedMediaType } | null;
+} | null> {
   const supabase = createSupabaseServerClient();
   const shipmentRef = generateShipmentReference();
   console.log("po_submission_start", { customerId, mediaUrlCount: mediaUrls.length, shipmentRef });
@@ -180,6 +190,7 @@ async function handlePOSubmission({
   const shipmentId = shipment.id as string;
   console.log("shipment_created", { shipmentId, shipmentRef });
   let storedCount = 0;
+  let firstReadable: { base64: string; mediaType: SupportedMediaType } | null = null;
 
   for (let i = 0; i < mediaUrls.length; i++) {
     const url = mediaUrls[i];
@@ -229,10 +240,22 @@ async function handlePOSubmission({
     }
 
     storedCount++;
+
+    // Remember the first AI-readable file for the auto-pipeline.
+    if (!firstReadable) {
+      const mediaType: SupportedMediaType | null =
+        ext === "pdf" ? "application/pdf"
+        : ext === "jpg" ? "image/jpeg"
+        : ext === "png" ? "image/png"
+        : null;
+      if (mediaType) {
+        firstReadable = { base64: media.bytes.toString("base64"), mediaType };
+      }
+    }
   }
 
   console.log("po_submission_complete", { storedCount, totalUrls: mediaUrls.length });
-  return { shipmentRef, fileCount: storedCount };
+  return { shipmentRef, fileCount: storedCount, shipmentId, firstReadable };
 }
 
 export async function POST(req: NextRequest) {
@@ -299,6 +322,23 @@ export async function POST(req: NextRequest) {
 
     if (!result) {
       return twimlResponse("I received your file but had trouble storing it. Please try sending again.");
+    }
+
+    // Kick off the auto-pipeline AFTER the reply is sent: AI extraction ->
+    // document generation -> review queue. Twilio gets its answer instantly.
+    const readable = result.firstReadable;
+    if (readable) {
+      const shipmentId = result.shipmentId;
+      after(async () => {
+        await runAutoPipeline({
+          shipmentId,
+          fileBase64: readable.base64,
+          mediaType: readable.mediaType,
+        });
+      });
+      return twimlResponse(
+        `Got your PO! Reference: ${result.shipmentRef}. I'm reading it now and preparing your draft documents — they'll be ready for review in about a minute.`
+      );
     }
 
     return twimlResponse(
