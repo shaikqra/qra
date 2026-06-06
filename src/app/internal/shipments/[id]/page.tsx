@@ -27,6 +27,7 @@ type IngestRow = {
 
 type AuditRow = {
   id: string;
+  operator_id: string | null;
   action_type: string;
   old_value: unknown;
   new_value: unknown;
@@ -83,7 +84,7 @@ export default async function ShipmentDetailPage({
 
   const { data: auditRows } = await supabase
     .from("audit_operator_action")
-    .select("id, action_type, old_value, new_value, created_at")
+    .select("id, operator_id, action_type, old_value, new_value, created_at")
     .eq("shipment_id", id)
     .order("created_at", { ascending: false })
     .limit(20);
@@ -229,7 +230,18 @@ export default async function ShipmentDetailPage({
                 className="rounded-md border border-zinc-200 bg-white p-3 text-xs"
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-zinc-700">{a.action_type}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-medium text-zinc-700">{a.action_type}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        a.operator_id
+                          ? "bg-zinc-100 text-zinc-600"
+                          : "bg-violet-100 text-violet-700"
+                      }`}
+                    >
+                      {a.operator_id ? "operator" : "system"}
+                    </span>
+                  </span>
                   <span className="text-zinc-500">
                     {new Date(a.created_at).toLocaleString()}
                   </span>
