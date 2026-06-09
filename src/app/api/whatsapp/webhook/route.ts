@@ -332,12 +332,25 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
       return `Thanks! We're just finalizing the documents for ${ref} — give us a moment and we'll confirm shortly.`;
     }
 
+    // Move the shipment to 'customer_approved' so the board reflects it.
+    // Guarded on the current status so a stale/duplicate reply can't clobber it.
+    await supabase
+      .from("shipments")
+      .update({ status: "customer_approved" })
+      .eq("id", shipmentId)
+      .eq("status", "awaiting_customer_approval");
+
     await supabase.from("audit_operator_action").insert({
       operator_id: null, // customer acted, not an operator
       shipment_id: shipmentId,
       action_type: "approve",
       old_value: { status: shipment.status },
-      new_value: { approved_by: "customer", approval_message: message, documents_approved: approvedCount },
+      new_value: {
+        approved_by: "customer",
+        approval_message: message,
+        documents_approved: approvedCount,
+        status_changed_to: "customer_approved",
+      },
     });
 
     console.log("customer_approval_recorded", { shipmentId, approvedCount });

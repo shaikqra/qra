@@ -38,6 +38,7 @@ const STATUS_OPTIONS = [
   { value: "sanctions_screening", label: "Sanctions screening" },
   { value: "bucket_b_review", label: "Bucket B review" },
   { value: "awaiting_customer_approval", label: "Awaiting customer approval" },
+  { value: "customer_approved", label: "Approved (customer)" },
   { value: "filed_with_cha", label: "Filed with CHA" },
   { value: "customs_cleared", label: "Customs cleared" },
   { value: "in_transit", label: "In transit" },

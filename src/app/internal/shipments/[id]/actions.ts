@@ -20,6 +20,7 @@ const ALLOWED_STATUSES = [
   "sanctions_screening",
   "bucket_b_review",
   "awaiting_customer_approval",
+  "customer_approved",
   "filed_with_cha",
   "customs_cleared",
   "in_transit",
