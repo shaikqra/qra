@@ -267,6 +267,102 @@ async function handlePOSubmission({
   return { shipmentRef, fileCount: storedCount, shipmentId, firstReadable };
 }
 
+// Short affirmations that count as a clear "yes, approved". We deliberately
+// require the WHOLE message to be one of these, so "yes but change the price"
+// is treated as a change request, not an approval.
+const APPROVAL_PHRASES = new Set([
+  "approve", "approved", "approve it", "approve them",
+  "yes", "yes approve", "yes approved", "yep", "yeah",
+  "ok", "okay", "confirm", "confirmed", "accept", "accepted",
+  "looks good", "lgtm", "go ahead", "all good",
+]);
+
+function isApprovalMessage(body: string): boolean {
+  const norm = body
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, "") // drop emoji/punctuation so "APPROVE ✅" -> "approve"
+    .replace(/\s+/g, " ")
+    .trim();
+  return APPROVAL_PHRASES.has(norm);
+}
+
+// If this customer has a shipment waiting on their approval, their text is an
+// approve/change decision — not a general chat message. Returns a reply string
+// when it handled the message, or null if nothing is pending (so the caller
+// falls through to normal chat). Never logs the message body (may contain PII).
+async function handleApprovalReply(customerId: string, body: string): Promise<string | null> {
+  const supabase = createSupabaseServerClient();
+
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, reference_number, status")
+    .eq("customer_id", customerId)
+    .eq("status", "awaiting_customer_approval")
+    // Order by reference_number (SHP-YYYYMMDD-xxxx) — a column we know exists.
+    // Newest reference sorts first; normally there's only one pending anyway.
+    .order("reference_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!shipment) return null;
+
+  const shipmentId = shipment.id as string;
+  const ref = shipment.reference_number as string;
+  const message = body.slice(0, 500); // cap stored text
+
+  if (isApprovalMessage(body)) {
+    // Record approval on the documents — the schema's designated slot. The
+    // immutability trigger allows only approved_at / approval_message to change.
+    const { data: updated, error: updErr } = await supabase
+      .from("generated_documents")
+      .update({ approved_at: new Date().toISOString(), approval_message: message })
+      .eq("shipment_id", shipmentId)
+      .is("approved_at", null)
+      .select("id");
+    const approvedCount = updated?.length ?? 0;
+
+    // Never tell the customer "approved & locked" unless documents were actually
+    // stamped. On error or an empty set, leave status unchanged so it can retry.
+    if (updErr || approvedCount === 0) {
+      console.error("customer_approval_not_recorded", {
+        shipmentId,
+        hasError: !!updErr,
+        approvedCount,
+      });
+      return `Thanks! We're just finalizing the documents for ${ref} — give us a moment and we'll confirm shortly.`;
+    }
+
+    await supabase.from("audit_operator_action").insert({
+      operator_id: null, // customer acted, not an operator
+      shipment_id: shipmentId,
+      action_type: "approve",
+      old_value: { status: shipment.status },
+      new_value: { approved_by: "customer", approval_message: message, documents_approved: approvedCount },
+    });
+
+    console.log("customer_approval_recorded", { shipmentId, approvedCount });
+    return `✅ Thank you! Your documents for ${ref} are approved and locked. We'll proceed with your shipment from here.`;
+  }
+
+  // Anything else = a change request: send it back to the operator review queue.
+  await supabase
+    .from("shipments")
+    .update({ status: "bucket_b_review" })
+    .eq("id", shipmentId)
+    .eq("status", "awaiting_customer_approval"); // no-op if it already moved
+
+  await supabase.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: { status: shipment.status },
+    new_value: { customer_change_request: message, status_changed_to: "bucket_b_review" },
+  });
+
+  console.log("customer_change_request_recorded", { shipmentId });
+  return `Got it — thanks for the feedback on ${ref}. Our team will revise the documents and send you updated copies shortly.`;
+}
+
 export async function POST(req: NextRequest) {
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
   const webhookUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
@@ -357,6 +453,20 @@ export async function POST(req: NextRequest) {
 
   if (!body) {
     return twimlResponse("Sorry, I couldn't read your message. Please try again.");
+  }
+
+  // If this customer has a shipment awaiting their approval, their text is an
+  // approve/change decision, not a general chat message.
+  try {
+    const approvalReply = await handleApprovalReply(customerId, body);
+    if (approvalReply) {
+      return twimlResponse(approvalReply);
+    }
+  } catch (err) {
+    console.error("approval_reply_failed", {
+      name: err instanceof Error ? err.name : "unknown",
+    });
+    // fall through to normal chat on error
   }
 
   try {
