@@ -344,23 +344,20 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
     return `✅ Thank you! Your documents for ${ref} are approved and locked. We'll proceed with your shipment from here.`;
   }
 
-  // Anything else = a change request: send it back to the operator review queue.
-  await supabase
-    .from("shipments")
-    .update({ status: "bucket_b_review" })
-    .eq("id", shipmentId)
-    .eq("status", "awaiting_customer_approval"); // no-op if it already moved
-
+  // Not a clear "yes". Don't bounce the shipment — a "hi" or "thanks" must not
+  // change its state. Record the message so the operator can see it and decide
+  // whether it's a real change request, then nudge the customer toward the
+  // decision. The operator drives any revision from the dashboard.
   await supabase.from("audit_operator_action").insert({
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "note",
-    old_value: { status: shipment.status },
-    new_value: { customer_change_request: message, status_changed_to: "bucket_b_review" },
+    old_value: null,
+    new_value: { customer_message: message },
   });
 
-  console.log("customer_change_request_recorded", { shipmentId });
-  return `Got it — thanks for the feedback on ${ref}. Our team will revise the documents and send you updated copies shortly.`;
+  console.log("customer_message_recorded", { shipmentId });
+  return `Thanks for your message about ${ref}. If the documents look good, reply APPROVE to approve them. If you'd like any changes, send us the details and our team will take care of it.`;
 }
 
 export async function POST(req: NextRequest) {
