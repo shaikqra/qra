@@ -365,9 +365,9 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
 
 export async function POST(req: NextRequest) {
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
-  const webhookUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
+  const configuredUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
 
-  if (!authToken || !webhookUrl) {
+  if (!authToken) {
     return new Response("Server misconfigured", { status: 500 });
   }
 
@@ -375,7 +375,26 @@ export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const params = Object.fromEntries(new URLSearchParams(rawBody)) as Record<string, string>;
 
-  const valid = twilio.validateRequest(authToken, signature, webhookUrl, params);
+  // Verify the Twilio signature against the URL Twilio actually called. We
+  // accept the configured URL OR the live request host — this keeps the webhook
+  // working on both the custom domain and the *.vercel.app domain. Security does
+  // not rely on the host being unspoofable: the signature still requires
+  // Twilio's auth token, so a forged request fails on every candidate URL.
+  const host = req.headers.get("host");
+  // x-forwarded-proto can be a comma-separated list behind proxies; take the first.
+  const proto = (req.headers.get("x-forwarded-proto") ?? "https").split(",")[0].trim();
+  const candidateUrls = [
+    configuredUrl,
+    host ? `${proto}://${host}/api/whatsapp/webhook` : undefined,
+  ].filter((u): u is string => !!u);
+
+  if (candidateUrls.length === 0) {
+    return new Response("Server misconfigured", { status: 500 });
+  }
+
+  const valid = candidateUrls.some((u) =>
+    twilio.validateRequest(authToken, signature, u, params)
+  );
   if (!valid) {
     return new Response("Unauthorized", { status: 401 });
   }
