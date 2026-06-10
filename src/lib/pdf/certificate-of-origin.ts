@@ -89,12 +89,12 @@ export async function buildCertificateOfOriginPdf(
   draw("CERTIFICATE OF ORIGIN", MARGIN, y, 18, bold);
   drawRight(`Ref.  ${data.reference}`, RIGHT, y, 10, bold);
   drawRight(`Date  ${data.date}`, RIGHT, y - 14, 9, font, GREY);
-  y -= 18;
-  draw("NON-PREFERENTIAL · DRAFT — NOT AN OFFICIAL CERTIFICATE", MARGIN, y, 9, bold, GREY);
+  y -= 34;
+  draw("NON-PREFERENTIAL DRAFT — NOT AN OFFICIAL CERTIFICATE", MARGIN, y, 9, bold, GREY);
   if (data.invoiceRef) {
     drawRight(`Invoice  ${data.invoiceRef}`, RIGHT, y, 9, font, GREY);
   }
-  y -= 14;
+  y -= 16;
   rule(y);
   y -= 24;
 
