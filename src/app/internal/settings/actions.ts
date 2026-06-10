@@ -21,6 +21,8 @@ export type ExporterProfileInput = {
   declaration_origin: string;
   default_currency: string;
   default_incoterm: string;
+  cha_name: string;
+  cha_email: string;
 };
 
 type Result = { ok: true } | { ok: false; error: string };

@@ -26,6 +26,11 @@ const BANK: Field[] = [
   { key: "bank_beneficiary", label: "Beneficiary name", placeholder: "Account holder name" },
 ];
 
+const CHA: Field[] = [
+  { key: "cha_name", label: "CHA name", placeholder: "Customs broker / CHA firm name" },
+  { key: "cha_email", label: "CHA email", placeholder: "broker@example.com" },
+];
+
 const DECLARATIONS: Field[] = [
   {
     key: "declaration_lut",
@@ -62,7 +67,7 @@ export function ProfileForm({ initial }: { initial: Partial<ExporterProfileInput
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const allFields = [...IDENTITY, ...BANK, ...DECLARATIONS];
+  const allFields = [...IDENTITY, ...BANK, ...CHA, ...DECLARATIONS];
   const [values, setValues] = useState<ExporterProfileInput>(() => {
     const v = {} as ExporterProfileInput;
     for (const f of allFields) v[f.key] = initial?.[f.key] ?? DEFAULTS[f.key] ?? "";
@@ -120,6 +125,13 @@ export function ProfileForm({ initial }: { initial: Partial<ExporterProfileInput
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Bank details</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{BANK.map(renderField)}</div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
+          CHA (Customs Broker)
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{CHA.map(renderField)}</div>
       </section>
 
       <section>

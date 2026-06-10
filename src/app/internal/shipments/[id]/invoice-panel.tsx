@@ -6,6 +6,7 @@ import { generateCommercialInvoice } from "./generate-invoice";
 import { generatePackingList } from "./generate-packing-list";
 import { generateCertificateOfOrigin } from "./generate-coo";
 import { approveAndSendDocs } from "./send-docs";
+import { sendDocsToCha } from "./send-to-cha";
 
 type GeneratedDoc = {
   id: string;
@@ -100,6 +101,32 @@ export function InvoicePanel({
             className="rounded-md bg-emerald-600 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
           >
             {pending ? "Working…" : "✅ Approve & send to customer"}
+          </button>
+        )}
+        {docs.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setMessage(null);
+              startTransition(async () => {
+                const result = await sendDocsToCha(shipmentId);
+                if (result.ok) {
+                  setMessage({
+                    ok: true,
+                    text:
+                      result.warning ??
+                      `Emailed ${result.sent} document(s) to the CHA — status set to filed with CHA.`,
+                  });
+                  router.refresh();
+                } else {
+                  setMessage({ ok: false, text: result.error });
+                }
+              });
+            }}
+            disabled={pending}
+            className="rounded-md bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {pending ? "Working…" : "📧 Email to CHA"}
           </button>
         )}
         {message && (
