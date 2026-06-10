@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildCommercialInvoicePdf } from "@/lib/pdf/commercial-invoice";
 import { buildPackingListPdf } from "@/lib/pdf/packing-list";
+import { buildCertificateOfOriginPdf } from "@/lib/pdf/certificate-of-origin";
 
 // Shared document-generation engine. Called by the dashboard buttons
 // (generatedBy = operator id) and by the WhatsApp auto-pipeline
@@ -13,6 +14,7 @@ export type GenerateResult =
 
 const INVOICE_GENERATOR = "pdf-lib / commercial-invoice@v2";
 const PACKING_GENERATOR = "pdf-lib / packing-list@v1";
+const COO_GENERATOR = "pdf-lib / certificate-of-origin@v1";
 
 const DEMO_SELLER = {
   name: "[Exporter — set in Settings]",
@@ -49,7 +51,7 @@ async function storeDocument(opts: {
   admin: ReturnType<typeof createSupabaseServerClient>;
   shipmentId: string;
   customerId: string;
-  docType: "commercial_invoice" | "packing_list";
+  docType: "commercial_invoice" | "packing_list" | "certificate_of_origin";
   fileSlug: string;
   generator: string;
   pdfBytes: Uint8Array;
@@ -227,6 +229,71 @@ export async function generatePackingListCore(
     docType: "packing_list",
     fileSlug: "packing-list",
     generator: PACKING_GENERATOR,
+    pdfBytes,
+    sourceData: d,
+    generatedBy,
+  });
+}
+
+export async function generateCertificateOfOriginCore(
+  shipmentId: string,
+  generatedBy: string | null
+): Promise<GenerateResult> {
+  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  if (!shipment) return { ok: false, error: "Shipment not found" };
+
+  const get = (k: string) => (d[k] ?? "").trim();
+  const prof = (k: string) => (p[k] ?? "").trim();
+
+  const required: [string, string][] = [
+    ["buyer_name", "Buyer name"],
+    ["product_description", "Product description"],
+    ["destination_country", "Destination country"],
+    ["hs_code", "HS code"],
+    ["quantity", "Quantity"],
+    ["number_of_packages", "No. of packages"],
+  ];
+  const missing = required.filter(([k]) => !get(k)).map(([, label]) => label);
+  if (missing.length > 0) {
+    return { ok: false, error: `Fill these fields first: ${missing.join(", ")}` };
+  }
+
+  const pdfBytes = await buildCertificateOfOriginPdf({
+    reference: shipment.reference_number as string,
+    date: new Date().toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+    seller: {
+      name: prof("legal_name") || DEMO_SELLER.name,
+      address: prof("address"),
+      iec: prof("iec"),
+    },
+    buyer: { name: get("buyer_name"), address: get("buyer_address") },
+    countryOfOrigin: "India",
+    destinationCountry: get("destination_country"),
+    portOfLoading: get("port_of_loading") || undefined,
+    portOfDischarge: get("port_of_discharge") || undefined,
+    vessel: get("vessel_name") || undefined,
+    hsCode: get("hs_code"),
+    productDescription: get("product_description"),
+    quantity: get("quantity"),
+    quantityUnit: get("quantity_unit"),
+    numberOfPackages: get("number_of_packages"),
+    packageType: get("package_type"),
+    grossWeight: get("gross_weight") || undefined,
+    weightUnit: get("weight_unit") || undefined,
+    invoiceRef: `CI-${shipment.reference_number}`,
+  });
+
+  return storeDocument({
+    admin,
+    shipmentId,
+    customerId: shipment.customer_id as string,
+    docType: "certificate_of_origin",
+    fileSlug: "certificate-of-origin",
+    generator: COO_GENERATOR,
     pdfBytes,
     sourceData: d,
     generatedBy,

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { generateCommercialInvoice } from "./generate-invoice";
 import { generatePackingList } from "./generate-packing-list";
+import { generateCertificateOfOrigin } from "./generate-coo";
 import { approveAndSendDocs } from "./send-docs";
 
 type GeneratedDoc = {
@@ -68,6 +69,14 @@ export function InvoicePanel({
           className="rounded-md border border-zinc-300 bg-white px-5 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
         >
           {pending ? "Generating…" : "Generate Packing List"}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleGenerate("Certificate of origin", generateCertificateOfOrigin)}
+          disabled={pending}
+          className="rounded-md border border-zinc-300 bg-white px-5 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          {pending ? "Generating…" : "Generate Certificate of Origin"}
         </button>
         {docs.length > 0 && (
           <button
