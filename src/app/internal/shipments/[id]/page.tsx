@@ -129,10 +129,14 @@ export default async function ShipmentDetailPage({
     .filter((t) => !Number.isNaN(t));
   const poReceivedMs = new Date(ship.created_at).getTime();
   const docsReadyMs = docTimes.length ? Math.max(...docTimes) : null;
-  const qraElapsedMs =
+  // Hide the card on stale shipments (worked on across sittings) — the
+  // wall-clock number only means something when the run was continuous.
+  const MAX_SHOWABLE_MS = 2 * 60 * 60 * 1000;
+  const elapsed =
     docsReadyMs !== null && docsReadyMs > poReceivedMs
       ? docsReadyMs - poReceivedMs
       : null;
+  const qraElapsedMs = elapsed !== null && elapsed < MAX_SHOWABLE_MS ? elapsed : null;
 
   return (
     <div className="flex flex-col gap-8">
