@@ -6,6 +6,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hashPhone } from "@/lib/hash";
 import { runAutoPipeline } from "@/lib/docs/auto-pipeline";
 import type { SupportedMediaType } from "@/lib/ai/extract-po";
+import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
+import { parseGapReply } from "@/lib/ai/parse-gap-reply";
+import {
+  generateCommercialInvoiceCore,
+  generatePackingListCore,
+} from "@/lib/docs/generate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -373,6 +379,104 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
   return `Thanks for your message about ${ref}. If the documents look good, reply APPROVE to approve them. If you'd like any changes, send us the details and our team will take care of it.`;
 }
 
+// If this customer has a shipment waiting on missing PO fields, parse their
+// text for those values, merge them in, and generate documents once complete.
+// Returns a reply string when it handled the message, or null to fall through.
+// Never logs the message body or field values (PII).
+async function handleGapFillReply(customerId: string, body: string): Promise<string | null> {
+  const supabase = createSupabaseServerClient();
+
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, reference_number, status, extracted_data")
+    .eq("customer_id", customerId)
+    .eq("status", "awaiting_customer_info")
+    .order("reference_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!shipment) return null;
+
+  const shipmentId = shipment.id as string;
+  const ref = shipment.reference_number as string;
+  const current = (shipment.extracted_data ?? {}) as Record<string, string>;
+
+  const missing = missingRequiredFields(current);
+  if (missing.length === 0) {
+    // Operator already completed the fields from the dashboard; nothing to ask.
+    return null;
+  }
+
+  const found = await parseGapReply(body.slice(0, 1000), missing);
+  const foundCount = Object.keys(found).length;
+
+  if (foundCount > 0) {
+    const merged = { ...current, ...found };
+    await supabase
+      .from("shipments")
+      .update({ extracted_data: merged })
+      .eq("id", shipmentId)
+      .eq("status", "awaiting_customer_info");
+
+    await supabase.from("audit_operator_action").insert({
+      operator_id: null, // customer provided the values
+      shipment_id: shipmentId,
+      action_type: "extract",
+      old_value: current,
+      new_value: merged,
+    });
+
+    const stillMissing = missingRequiredFields(merged);
+    console.log("gap_fill_reply_processed", {
+      shipmentId,
+      filledCount: foundCount,
+      stillMissingCount: stillMissing.length,
+    });
+
+    if (stillMissing.length === 0) {
+      // Atomic claim: only the request that actually flips the status gets to
+      // generate. A concurrent reply matches zero rows here and must not
+      // generate a duplicate document set.
+      const { data: claimed } = await supabase
+        .from("shipments")
+        .update({ status: "generating_documents" })
+        .eq("id", shipmentId)
+        .eq("status", "awaiting_customer_info")
+        .select("id");
+      if (!claimed || claimed.length === 0) {
+        return `Thanks — I've got everything for ${ref} and I'm preparing your documents now.`;
+      }
+
+      const invoice = await generateCommercialInvoiceCore(shipmentId, null);
+      await generatePackingListCore(shipmentId, null);
+
+      await supabase
+        .from("shipments")
+        .update({ status: invoice.ok ? "bucket_b_review" : "awaiting_customer_info" })
+        .eq("id", shipmentId)
+        .eq("status", "generating_documents");
+
+      if (invoice.ok) {
+        return `✅ That's everything for ${ref} — thank you! I'm preparing your draft documents now; our team will review and send them to you shortly.`;
+      }
+      return `Thanks! I've noted the details for ${ref}. Our team will finish your documents and send them shortly.`;
+    }
+
+    return (
+      `Thanks — noted for ${ref}. I still need:\n` +
+      labelsFor(stillMissing).map((l) => `• ${l}`).join("\n") +
+      `\nJust reply with the details here.`
+    );
+  }
+
+  // Nothing usable in the reply — repeat the ask.
+  return (
+    `Thanks for your message about ${ref}. To finish your documents I still need:\n` +
+    labelsFor(missing).map((l) => `• ${l}`).join("\n") +
+    `\nJust reply with the details here.`
+  );
+}
+
 export async function POST(req: NextRequest) {
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
   const configuredUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
@@ -493,6 +597,20 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) {
     console.error("approval_reply_failed", {
+      name: err instanceof Error ? err.name : "unknown",
+    });
+    // fall through to normal chat on error
+  }
+
+  // If a shipment is waiting on missing PO fields, treat their text as the
+  // answer to our gap-fill question.
+  try {
+    const gapFillReply = await handleGapFillReply(customerId, body);
+    if (gapFillReply) {
+      return twimlResponse(gapFillReply);
+    }
+  } catch (err) {
+    console.error("gap_fill_reply_failed", {
       name: err instanceof Error ? err.name : "unknown",
     });
     // fall through to normal chat on error

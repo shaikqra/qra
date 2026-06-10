@@ -1,9 +1,42 @@
+import twilio from "twilio";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { extractPoFields, type SupportedMediaType } from "@/lib/ai/extract-po";
 import {
   generateCommercialInvoiceCore,
   generatePackingListCore,
 } from "@/lib/docs/generate";
+import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
+
+// Best-effort WhatsApp text to the shipment's customer. Returns whether the
+// message was sent so callers can surface a failed notification.
+async function sendWhatsAppText(
+  admin: ReturnType<typeof createSupabaseServerClient>,
+  customerId: string,
+  text: string
+): Promise<boolean> {
+  try {
+    const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
+    const token = process.env.TWILIO_AUTH_TOKEN?.trim();
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER?.trim();
+    if (!sid || !token || !fromNumber) return false;
+
+    const { data: customer } = await admin
+      .from("customers")
+      .select("whatsapp_number")
+      .eq("id", customerId)
+      .maybeSingle();
+    const to = (customer?.whatsapp_number ?? "").trim();
+    if (!to) return false;
+
+    await twilio(sid, token).messages.create({ from: fromNumber, to, body: text });
+    return true;
+  } catch (err) {
+    console.error("gap_fill_notify_failed", {
+      name: err instanceof Error ? err.name : "unknown",
+    });
+    return false;
+  }
+}
 
 // The automation: runs in the background after a PO lands on WhatsApp.
 //   extract fields -> save -> generate documents -> set status for review.
@@ -63,6 +96,44 @@ export async function runAutoPipeline(args: {
       .update({ extracted_data: merged })
       .eq("id", args.shipmentId);
     await audit("extract", current, merged);
+
+    // Gap-fill: if required fields are missing, ask the customer on WhatsApp
+    // instead of generating incomplete documents. Their reply is handled by
+    // the webhook (awaiting_customer_info branch).
+    const missing = missingRequiredFields(merged);
+    if (missing.length > 0) {
+      const { data: shipRow } = await admin
+        .from("shipments")
+        .select("customer_id, reference_number")
+        .eq("id", args.shipmentId)
+        .maybeSingle();
+      await setStatus("awaiting_customer_info");
+      if (shipRow) {
+        const notified = await sendWhatsAppText(
+          admin,
+          shipRow.customer_id as string,
+          `I've read your PO (ref ${shipRow.reference_number}). To finish your documents I still need:\n` +
+            labelsFor(missing).map((l) => `• ${l}`).join("\n") +
+            `\nJust reply with the details here.`
+        );
+        if (!notified) {
+          // Surface the failed ask on the shipment's audit trail so the
+          // operator knows the customer was never contacted.
+          await admin.from("audit_operator_action").insert({
+            operator_id: null,
+            shipment_id: args.shipmentId,
+            action_type: "note",
+            old_value: null,
+            new_value: { event: "customer_notify_failed", missing_count: missing.length },
+          });
+        }
+      }
+      console.log("auto_pipeline_gap_fill", {
+        shipmentId: args.shipmentId,
+        missingCount: missing.length,
+      });
+      return;
+    }
 
     await setStatus("generating_documents");
 
