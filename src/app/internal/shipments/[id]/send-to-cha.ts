@@ -107,7 +107,15 @@ export async function sendDocsToCha(shipmentId: string): Promise<Result> {
     if (!res.ok) {
       // Log status only — never the response body (may echo recipient/content).
       console.error("sendDocsToCha email failed:", res.status);
-      return { ok: false, error: "Could not send the email to the CHA. Check the Resend setup." };
+      const hint =
+        res.status === 401
+          ? "the API key looks wrong"
+          : res.status === 403
+            ? "the sender domain is not allowed"
+            : res.status === 422
+              ? "the from/to address format is invalid"
+              : `code ${res.status}`;
+      return { ok: false, error: `Could not send the email to the CHA (${hint}).` };
     }
 
     const { error: statusErr } = await admin
