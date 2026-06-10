@@ -42,6 +42,16 @@ type GeneratedDocRow = {
   generated_at: string;
 };
 
+// Render a measured elapsed time as a human phrase ("8 min", "2 hr 5 min").
+function formatDuration(ms: number): string {
+  const totalMin = Math.round(ms / 60000);
+  if (totalMin < 1) return "under a minute";
+  if (totalMin < 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m ? `${h} hr ${m} min` : `${h} hr`;
+}
+
 export default async function ShipmentDetailPage({
   params,
 }: {
@@ -112,6 +122,18 @@ export default async function ShipmentDetailPage({
     })
   );
 
+  // USP metric: real time from PO landing to documents ready.
+  // PO received = shipment created_at; documents ready = latest generated_at.
+  const docTimes = generatedDocs
+    .map((d) => new Date(d.generated_at).getTime())
+    .filter((t) => !Number.isNaN(t));
+  const poReceivedMs = new Date(ship.created_at).getTime();
+  const docsReadyMs = docTimes.length ? Math.max(...docTimes) : null;
+  const qraElapsedMs =
+    docsReadyMs !== null && docsReadyMs > poReceivedMs
+      ? docsReadyMs - poReceivedMs
+      : null;
+
   return (
     <div className="flex flex-col gap-8">
       <div className="flex items-center justify-between">
@@ -132,6 +154,25 @@ export default async function ShipmentDetailPage({
           </p>
         </div>
       </div>
+
+      {qraElapsedMs !== null && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+              Qra turnaround
+            </span>
+            <span className="text-2xl font-semibold text-emerald-900">
+              {formatDuration(qraElapsedMs)}
+            </span>
+            <span className="text-sm text-emerald-700">
+              from PO received to documents ready
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-emerald-700/80">
+            Typical manual process: 10–15 hours per shipment.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <section className="flex flex-col gap-4">
