@@ -58,27 +58,33 @@ function twimlResponse(message: string): Response {
   });
 }
 
-async function getOrCreateCustomer(phoneHash: string, whatsappNumber: string): Promise<string | null> {
+async function getOrCreateCustomer(
+  phoneHash: string,
+  whatsappNumber: string,
+  profileName: string
+): Promise<string | null> {
   try {
     const supabase = createSupabaseServerClient();
+    const name = profileName.trim().slice(0, 120) || null;
     const { data: existing } = await supabase
       .from("customers")
-      .select("id, whatsapp_number")
+      .select("id, whatsapp_number, display_name")
       .eq("phone_hash", phoneHash)
       .maybeSingle();
     if (existing) {
-      // Backfill the number for customers created before we stored it.
-      if (!existing.whatsapp_number) {
-        await supabase
-          .from("customers")
-          .update({ whatsapp_number: whatsappNumber })
-          .eq("id", existing.id);
+      // Backfill number/name for customers created before we stored them.
+      // Never overwrite a display_name — the operator may have set it.
+      const patch: Record<string, string> = {};
+      if (!existing.whatsapp_number) patch.whatsapp_number = whatsappNumber;
+      if (!existing.display_name && name) patch.display_name = name;
+      if (Object.keys(patch).length > 0) {
+        await supabase.from("customers").update(patch).eq("id", existing.id);
       }
       return existing.id as string;
     }
     const { data: inserted, error } = await supabase
       .from("customers")
-      .insert({ phone_hash: phoneHash, whatsapp_number: whatsappNumber })
+      .insert({ phone_hash: phoneHash, whatsapp_number: whatsappNumber, display_name: name })
       .select("id")
       .single();
     if (error || !inserted) {
@@ -539,7 +545,7 @@ export async function POST(req: NextRequest) {
   }
 
   const phoneHash = hashPhone(from);
-  const customerId = await getOrCreateCustomer(phoneHash, from);
+  const customerId = await getOrCreateCustomer(phoneHash, from, params.ProfileName ?? "");
 
   if (!customerId) {
     return twimlResponse("Sorry, I'm having trouble setting up your profile. Please try again.");
