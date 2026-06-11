@@ -33,11 +33,21 @@ async function loadShipmentAndProfile(shipmentId: string) {
 
   if (error || !shipment) return { admin, shipment: null, d: {}, p: {} };
 
-  const { data: profile } = await admin
+  // Prefer the profile of this shipment's exporter; fall back to the default
+  // profile for customers that don't have their own yet.
+  let { data: profile } = await admin
     .from("exporter_profiles")
     .select("*")
-    .eq("is_default", true)
+    .eq("customer_id", shipment.customer_id)
     .maybeSingle();
+  if (!profile) {
+    const { data: fallback } = await admin
+      .from("exporter_profiles")
+      .select("*")
+      .eq("is_default", true)
+      .maybeSingle();
+    profile = fallback;
+  }
 
   return {
     admin,

@@ -62,10 +62,19 @@ const DEFAULTS: Partial<Record<keyof ExporterProfileInput, string>> = {
     'The Exporter [legal name], registered under number [your REX number], declares that, except where otherwise clearly indicated, these products are of INDIAN preferential origin according to the rules of origin of the Generalised System of Preferences of the European Union, and that the origin criterion met is "P".',
 };
 
-export function ProfileForm({ initial }: { initial: Partial<ExporterProfileInput> | null }) {
+export function ProfileForm({
+  initial,
+  customerId,
+  initialCustomerName,
+}: {
+  initial: Partial<ExporterProfileInput> | null;
+  customerId: string | null;
+  initialCustomerName?: string;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [customerName, setCustomerName] = useState(initialCustomerName ?? "");
 
   const allFields = [...IDENTITY, ...BANK, ...CHA, ...DECLARATIONS];
   const [values, setValues] = useState<ExporterProfileInput>(() => {
@@ -82,7 +91,7 @@ export function ProfileForm({ initial }: { initial: Partial<ExporterProfileInput
     e.preventDefault();
     setMessage(null);
     startTransition(async () => {
-      const result = await saveExporterProfile(values);
+      const result = await saveExporterProfile(values, customerId, customerName);
       if (result.ok) {
         setMessage({ ok: true, text: "Saved." });
         router.refresh();
@@ -117,6 +126,24 @@ export function ProfileForm({ initial }: { initial: Partial<ExporterProfileInput
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-8 max-w-3xl">
+      {customerId && (
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
+            Customer
+          </h2>
+          <label className="flex flex-col gap-1 text-sm max-w-sm">
+            <span className="text-zinc-700 font-medium">Customer name</span>
+            <input
+              type="text"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder="e.g. Nava Quality Foods"
+              className="rounded-md border border-zinc-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
+            />
+          </label>
+        </section>
+      )}
+
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Identity</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{IDENTITY.map(renderField)}</div>

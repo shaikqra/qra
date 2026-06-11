@@ -31,17 +31,26 @@ export async function sendDocsToCha(shipmentId: string): Promise<Result> {
 
     const { data: shipment } = await admin
       .from("shipments")
-      .select("id, reference_number, status")
+      .select("id, customer_id, reference_number, status")
       .eq("id", shipmentId)
       .maybeSingle();
     if (!shipment) return { ok: false, error: "Shipment not found" };
     const ref = shipment.reference_number as string;
 
-    const { data: profile } = await admin
+    // This exporter's own CHA, falling back to the default profile's.
+    let { data: profile } = await admin
       .from("exporter_profiles")
       .select("cha_name, cha_email")
-      .eq("is_default", true)
+      .eq("customer_id", shipment.customer_id)
       .maybeSingle();
+    if (!profile) {
+      const { data: fallback } = await admin
+        .from("exporter_profiles")
+        .select("cha_name, cha_email")
+        .eq("is_default", true)
+        .maybeSingle();
+      profile = fallback;
+    }
     const chaEmail = (profile?.cha_email ?? "").trim();
     if (!chaEmail) {
       return { ok: false, error: "Set the CHA email in Settings first." };
