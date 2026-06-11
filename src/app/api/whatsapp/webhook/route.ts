@@ -7,6 +7,7 @@ import { hashPhone } from "@/lib/hash";
 import { runAutoPipeline } from "@/lib/docs/auto-pipeline";
 import type { SupportedMediaType } from "@/lib/ai/extract-po";
 import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
+import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import {
   generateCommercialInvoiceCore,
@@ -441,6 +442,44 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
     });
 
     if (stillMissing.length === 0) {
+      // Trust gate: rules must accept the merged data before the agent acts
+      // on it, and originally-extracted fields the model was unsure about
+      // still need a human look (customer-filled fields carry confidence 1.0
+      // from extraction, since they were blank there). Failures route to the
+      // operator queue, not to generation.
+      const issues = validateExtracted(merged);
+      let storedConfidence: Record<string, number> = {};
+      try {
+        storedConfidence = JSON.parse(merged["_confidence"] ?? "{}");
+      } catch {
+        storedConfidence = {};
+      }
+      const shaky = lowConfidenceFields(merged, storedConfidence);
+      if (issues.length > 0 || shaky.length > 0) {
+        await supabase
+          .from("shipments")
+          .update({ status: "bucket_b_review" })
+          .eq("id", shipmentId)
+          .eq("status", "awaiting_customer_info");
+        await supabase.from("audit_operator_action").insert({
+          operator_id: null,
+          shipment_id: shipmentId,
+          action_type: "note",
+          old_value: null,
+          new_value: {
+            event: "trust_gate_flagged",
+            validation_issues: issues,
+            low_confidence_fields: shaky,
+          },
+        });
+        console.log("gap_fill_trust_gate", {
+          shipmentId,
+          issueCount: issues.length,
+          lowConfidenceCount: shaky.length,
+        });
+        return `Thanks! I've noted the details for ${ref}. Our team will double-check everything and send your documents shortly.`;
+      }
+
       // Atomic claim: only the request that actually flips the status gets to
       // generate. A concurrent reply matches zero rows here and must not
       // generate a duplicate document set.

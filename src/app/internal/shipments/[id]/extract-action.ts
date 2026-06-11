@@ -52,7 +52,7 @@ export async function extractShipmentFields(shipmentId: string): Promise<Result>
     if (dlErr || !blob) return { ok: false, error: "Could not open the PO file" };
 
     const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
-    const fields = await extractPoFields(base64, readable.media);
+    const { fields } = await extractPoFields(base64, readable.media);
 
     return { ok: true, fields };
   } catch (e) {

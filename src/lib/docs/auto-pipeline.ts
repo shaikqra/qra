@@ -7,6 +7,7 @@ import {
 } from "@/lib/docs/generate";
 import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
+import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 
 // Best-effort WhatsApp text to the shipment's customer. Returns whether the
 // message was sent so callers can surface a failed notification.
@@ -79,7 +80,7 @@ export async function runAutoPipeline(args: {
   try {
     await setStatus("data_extracting");
 
-    const fields = await extractPoFields(args.fileBase64, args.mediaType);
+    const { fields, confidence } = await extractPoFields(args.fileBase64, args.mediaType);
 
     // Merge non-empty extracted values over whatever already exists.
     const { data: ship } = await admin
@@ -92,6 +93,10 @@ export async function runAutoPipeline(args: {
     for (const [k, v] of Object.entries(fields)) {
       if (v) merged[k] = v;
     }
+    // Persist the per-field confidence under a reserved key so the gap-fill
+    // path can re-check it later. Forms and doc generators read named fields
+    // only, so this never leaks into a document.
+    merged["_confidence"] = JSON.stringify(confidence);
     await admin
       .from("shipments")
       .update({ extracted_data: merged })
@@ -132,6 +137,32 @@ export async function runAutoPipeline(args: {
       console.log("auto_pipeline_gap_fill", {
         shipmentId: args.shipmentId,
         missingCount: missing.length,
+      });
+      return;
+    }
+
+    // Trust gate: deterministic rules + extraction confidence. Anything the
+    // rules reject or the model wasn't sure about goes to the operator —
+    // the agent may not act on data it can't vouch for.
+    const issues = validateExtracted(merged);
+    const shaky = lowConfidenceFields(merged, confidence);
+    if (issues.length > 0 || shaky.length > 0) {
+      await setStatus("bucket_b_review");
+      await admin.from("audit_operator_action").insert({
+        operator_id: null,
+        shipment_id: args.shipmentId,
+        action_type: "note",
+        old_value: null,
+        new_value: {
+          event: "trust_gate_flagged",
+          validation_issues: issues,
+          low_confidence_fields: shaky,
+        },
+      });
+      console.log("auto_pipeline_trust_gate", {
+        shipmentId: args.shipmentId,
+        issueCount: issues.length,
+        lowConfidenceCount: shaky.length,
       });
       return;
     }
