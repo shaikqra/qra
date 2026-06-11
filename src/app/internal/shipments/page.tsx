@@ -9,6 +9,13 @@ type ShipmentRow = {
   status: string;
   created_at: string;
   customer_po_number: string | null;
+  extracted_data: Record<string, string> | null;
+};
+
+type CustomerRow = {
+  id: string;
+  display_name: string | null;
+  whatsapp_number: string | null;
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -28,15 +35,29 @@ const STATUS_COLORS: Record<string, string> = {
   rejected: "bg-red-100 text-red-800",
 };
 
-export default async function ShipmentsListPage() {
+function customerLabel(c: CustomerRow | undefined, customerId: string): string {
+  if (c?.display_name) return c.display_name;
+  if (c?.whatsapp_number) return c.whatsapp_number.replace(/^whatsapp:/, "");
+  return `${customerId.slice(0, 8)}…`;
+}
+
+export default async function ShipmentsListPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
   await ensureOperator();
+  const { q } = await searchParams;
+  const query = (q ?? "").trim().toLowerCase();
   const supabase = await createSupabaseAuthClient();
 
   const { data: shipments, error } = await supabase
     .from("shipments")
-    .select("id, reference_number, customer_id, status, created_at, customer_po_number")
+    .select(
+      "id, reference_number, customer_id, status, created_at, customer_po_number, extracted_data"
+    )
     .order("created_at", { ascending: false })
-    .limit(100);
+    .limit(200);
 
   if (error) {
     return (
@@ -46,7 +67,32 @@ export default async function ShipmentsListPage() {
     );
   }
 
-  const rows = (shipments ?? []) as ShipmentRow[];
+  const { data: customerRows } = await supabase
+    .from("customers")
+    .select("id, display_name, whatsapp_number");
+  const customersById = new Map(
+    ((customerRows ?? []) as CustomerRow[]).map((c) => [c.id, c])
+  );
+
+  const all = (shipments ?? []) as ShipmentRow[];
+
+  // In-memory search across reference, PO note, buyer and customer name —
+  // fine at the current scale (we fetch at most 200 rows).
+  const rows = query
+    ? all.filter((r) => {
+        const customer = customerLabel(customersById.get(r.customer_id), r.customer_id);
+        const haystack = [
+          r.reference_number,
+          r.customer_po_number ?? "",
+          r.extracted_data?.buyer_name ?? "",
+          r.status.replace(/_/g, " "),
+          customer,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query);
+      })
+    : all;
 
   return (
     <div>
@@ -55,9 +101,35 @@ export default async function ShipmentsListPage() {
         <span className="text-sm text-zinc-500">{rows.length} shown</span>
       </div>
 
+      <form method="get" className="mb-4 flex items-center gap-2">
+        <input
+          type="search"
+          name="q"
+          defaultValue={q ?? ""}
+          placeholder="Search by reference, buyer, customer, PO or status…"
+          className="w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
+        />
+        <button
+          type="submit"
+          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+        >
+          Search
+        </button>
+        {query && (
+          <Link
+            href="/internal/shipments"
+            className="text-sm text-zinc-500 hover:text-zinc-900"
+          >
+            Clear
+          </Link>
+        )}
+      </form>
+
       {rows.length === 0 ? (
         <div className="rounded-md border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500">
-          No shipments yet. They appear here as exporters send POs via WhatsApp.
+          {query
+            ? "No shipments match your search."
+            : "No shipments yet. They appear here as exporters send POs via WhatsApp."}
         </div>
       ) : (
         <div className="overflow-hidden rounded-md border border-zinc-200 bg-white">
@@ -66,8 +138,8 @@ export default async function ShipmentsListPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">Reference</th>
                 <th className="px-4 py-3 font-medium">Customer</th>
+                <th className="px-4 py-3 font-medium">Buyer</th>
                 <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">PO note</th>
                 <th className="px-4 py-3 font-medium">Received</th>
               </tr>
             </thead>
@@ -82,8 +154,13 @@ export default async function ShipmentsListPage() {
                       {r.reference_number}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-500">
-                    {r.customer_id.slice(0, 8)}…
+                  <td className="px-4 py-3 text-zinc-700">
+                    {customerLabel(customersById.get(r.customer_id), r.customer_id)}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 truncate max-w-xs">
+                    {r.extracted_data?.buyer_name || (
+                      <span className="text-zinc-400">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span
@@ -93,9 +170,6 @@ export default async function ShipmentsListPage() {
                     >
                       {r.status.replace(/_/g, " ")}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600 truncate max-w-xs">
-                    {r.customer_po_number ?? <span className="text-zinc-400">—</span>}
                   </td>
                   <td className="px-4 py-3 text-zinc-500">
                     {new Date(r.created_at).toLocaleString()}

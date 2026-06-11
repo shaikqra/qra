@@ -10,6 +10,7 @@ type Result = { ok: true; sent: number } | { ok: false; error: string };
 const DOC_LABELS: Record<string, string> = {
   commercial_invoice: "Commercial Invoice",
   packing_list: "Packing List",
+  certificate_of_origin: "Certificate of Origin",
 };
 
 // Operator approval: send the latest generated documents to the customer on
@@ -65,6 +66,8 @@ export async function approveAndSendDocs(shipmentId: string): Promise<Result> {
     const client = twilio(sid, token);
     let sent = 0;
 
+    // WhatsApp via Twilio allows one file per message, so the documents go out
+    // back-to-back labeled by name only, followed by a single approval prompt.
     for (const [docType, path] of latest) {
       const { data: signed } = await admin.storage
         .from("generated-docs")
@@ -74,13 +77,19 @@ export async function approveAndSendDocs(shipmentId: string): Promise<Result> {
       await client.messages.create({
         from: fromNumber,
         to,
-        body: `${DOC_LABELS[docType] ?? docType} for shipment ${shipment.reference_number}. Reply APPROVE to approve, or tell us what to change.`,
+        body: `${DOC_LABELS[docType] ?? docType} — shipment ${shipment.reference_number}`,
         mediaUrl: [signed.signedUrl],
       });
       sent++;
     }
 
     if (sent === 0) return { ok: false, error: "Could not prepare document links" };
+
+    await client.messages.create({
+      from: fromNumber,
+      to,
+      body: `That's all ${sent} document(s) for shipment ${shipment.reference_number}. Reply APPROVE to approve them all, or tell us what to change.`,
+    });
 
     await admin
       .from("shipments")
