@@ -6,6 +6,7 @@ import {
   generatePackingListCore,
 } from "@/lib/docs/generate";
 import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
+import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 
 // Best-effort WhatsApp text to the shipment's customer. Returns whether the
 // message was sent so callers can surface a failed notification.
@@ -141,13 +142,32 @@ export async function runAutoPipeline(args: {
     const invoice = await generateCommercialInvoiceCore(args.shipmentId, null);
     const packing = await generatePackingListCore(args.shipmentId, null);
 
+    // Clean path: documents generated — send them straight to the customer
+    // for approval (agentic flow; the customer is the human gate). Anything
+    // that didn't generate cleanly goes to the operator's review queue.
+    let autoSent = false;
+    if (invoice.ok && packing.ok) {
+      try {
+        const sendResult = await sendDocsToCustomerCore(args.shipmentId, null);
+        autoSent = sendResult.ok;
+        if (!sendResult.ok) {
+          await setStatus("bucket_b_review");
+        }
+      } catch {
+        // A partial/thrown send must reach the operator queue, not fall
+        // through to the outer catch's po_received reset.
+        await setStatus("bucket_b_review");
+      }
+    } else {
+      await setStatus("bucket_b_review");
+    }
+
     console.log("auto_pipeline_done", {
       shipmentId: args.shipmentId,
       invoiceOk: invoice.ok,
       packingOk: packing.ok,
+      autoSent,
     });
-
-    await setStatus(invoice.ok ? "bucket_b_review" : "awaiting_customer_info");
   } catch (e) {
     console.error("auto_pipeline_failed", {
       shipmentId: args.shipmentId,

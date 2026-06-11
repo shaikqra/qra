@@ -12,6 +12,7 @@ import {
   generateCommercialInvoiceCore,
   generatePackingListCore,
 } from "@/lib/docs/generate";
+import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -453,19 +454,37 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
         return `Thanks — I've got everything for ${ref} and I'm preparing your documents now.`;
       }
 
-      const invoice = await generateCommercialInvoiceCore(shipmentId, null);
-      await generatePackingListCore(shipmentId, null);
+      // Generate + send in the background so the TwiML reply beats Twilio's
+      // ~15s webhook timeout. Agentic flow: documents go straight to the
+      // customer; their APPROVE is the human gate. Any failure (including a
+      // partial/thrown send) routes to the operator queue.
+      after(async () => {
+        const admin = createSupabaseServerClient();
+        const toOperatorQueue = async () => {
+          await admin
+            .from("shipments")
+            .update({ status: "bucket_b_review" })
+            .eq("id", shipmentId)
+            .eq("status", "generating_documents");
+        };
+        try {
+          const invoice = await generateCommercialInvoiceCore(shipmentId, null);
+          const packing = await generatePackingListCore(shipmentId, null);
+          if (invoice.ok && packing.ok) {
+            const sendResult = await sendDocsToCustomerCore(shipmentId, null);
+            if (sendResult.ok) return;
+          }
+          await toOperatorQueue();
+        } catch (err) {
+          console.error("gap_fill_autosend_failed", {
+            shipmentId,
+            name: err instanceof Error ? err.name : "unknown",
+          });
+          await toOperatorQueue();
+        }
+      });
 
-      await supabase
-        .from("shipments")
-        .update({ status: invoice.ok ? "bucket_b_review" : "awaiting_customer_info" })
-        .eq("id", shipmentId)
-        .eq("status", "generating_documents");
-
-      if (invoice.ok) {
-        return `✅ That's everything for ${ref} — thank you! I'm preparing your draft documents now; our team will review and send them to you shortly.`;
-      }
-      return `Thanks! I've noted the details for ${ref}. Our team will finish your documents and send them shortly.`;
+      return `✅ That's everything for ${ref} — thank you! I'm preparing your draft documents now; they'll arrive in this chat in about a minute. Reply APPROVE once you've checked them.`;
     }
 
     return (
