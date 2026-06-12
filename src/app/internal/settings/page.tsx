@@ -5,6 +5,10 @@ import { ProfileForm } from "./profile-form";
 import { SanctionsRefresh } from "./sanctions-refresh";
 import type { ExporterProfileInput } from "./actions";
 
+// The sanctions-list refresh fetches and parses large government files; give
+// the server action room to finish.
+export const maxDuration = 60;
+
 const PROFILE_COLUMNS =
   "legal_name, address, factory_address, cin, gstin, iec, organic_code, bank_name, bank_branch, bank_swift, bank_account, bank_beneficiary, declaration_lut, declaration_rodtep, declaration_origin, default_currency, default_incoterm, cha_name, cha_email";
 

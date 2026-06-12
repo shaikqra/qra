@@ -6,8 +6,8 @@ import { screenLocalName, localListStatus } from "./local-lists";
 // audit note so the record is self-explanatory years later.
 const SCREENING_SCOPE = {
   screened_parties: "buyer, consignee, notify-party (when named)",
-  lists: "US Consolidated Screening List (~13 US lists incl. OFAC SDN) + UN Security Council Consolidated List",
-  not_screened: ["EU consolidated", "India DGFT/SCOMET", "bank"],
+  lists: "US Consolidated Screening List (~13 US lists incl. OFAC SDN) + UN Security Council Consolidated List + EU Consolidated Financial Sanctions List",
+  not_screened: ["India DGFT/SCOMET", "freight forwarder", "carrier", "vessel", "bank"],
 };
 
 export type ShipmentParty = { role: string; name: string };

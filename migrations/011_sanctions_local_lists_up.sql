@@ -34,7 +34,7 @@ as $$
   where e.normalized_name % query_name
     and similarity(e.normalized_name, query_name) >= min_sim
   order by score desc
-  limit 20;
+  limit 50;
 $$;
 
 -- Completion marker: a provider counts as "loaded" only when a successful

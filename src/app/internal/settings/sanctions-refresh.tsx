@@ -13,9 +13,10 @@ export function SanctionsRefresh() {
         Denied-party lists
       </h2>
       <p className="text-sm text-zinc-600 mb-3 max-w-2xl">
-        Buyers are screened against the US Consolidated Screening List (live) and the
-        UN Security Council Consolidated List (loaded here). Refresh weekly to keep the UN
-        list current — until it&apos;s loaded, shipments wait in sanctions review.
+        Buyers are screened against the US Consolidated Screening List (live) plus the
+        UN and EU consolidated lists (loaded here). Refresh weekly to keep them current —
+        until a list is loaded, shipments wait in sanctions review. The EU list is large,
+        so this can take up to a minute.
       </p>
       <div className="flex items-center gap-3">
         <button
@@ -25,16 +26,21 @@ export function SanctionsRefresh() {
             setMessage(null);
             startTransition(async () => {
               const r = await refreshSanctionsLists();
-              setMessage(
-                r.ok
-                  ? { ok: true, text: `Loaded ${r.count} UN entries.` }
-                  : { ok: false, text: r.error }
-              );
+              if (r.ok) {
+                const text = r.results
+                  .map((x) =>
+                    x.ok ? `${x.provider}: ${x.count} loaded` : `${x.provider}: failed`
+                  )
+                  .join(" · ");
+                setMessage({ ok: r.results.every((x) => x.ok), text });
+              } else {
+                setMessage({ ok: false, text: r.error });
+              }
             });
           }}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
         >
-          {pending ? "Refreshing…" : "Refresh UN list"}
+          {pending ? "Refreshing…" : "Refresh UN + EU lists"}
         </button>
         {message && (
           <span className={`text-sm ${message.ok ? "text-emerald-700" : "text-red-600"}`}>

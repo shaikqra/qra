@@ -2,17 +2,17 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseAuthClient, getOperatorSession } from "@/lib/supabase/auth";
-import { ingestUnList } from "@/lib/screening/local-lists";
+import { refreshAllLists, type RefreshResult } from "@/lib/screening/local-lists";
 
-// Operator-triggered refresh of the locally-ingested denied-party lists (UN).
+// Operator-triggered refresh of the locally-ingested denied-party lists (UN, EU).
 export async function refreshSanctionsLists(): Promise<
-  { ok: true; count: number } | { ok: false; error: string }
+  { ok: true; results: RefreshResult[] } | { ok: false; error: string }
 > {
   const session = await getOperatorSession();
   if (!session) return { ok: false, error: "Not authorized" };
   try {
-    const { count } = await ingestUnList();
-    return { ok: true, count };
+    const results = await refreshAllLists();
+    return { ok: true, results };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("refreshSanctionsLists failed:", msg);
