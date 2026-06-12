@@ -7,6 +7,8 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 export const PO_FIELD_KEYS = [
   "buyer_name",
   "buyer_address",
+  "consignee_name",
+  "notify_party_name",
   "destination_country",
   "hs_code",
   "product_description",
@@ -33,8 +35,10 @@ export type PoFields = Record<(typeof PO_FIELD_KEYS)[number], string>;
 export type PoConfidence = Record<(typeof PO_FIELD_KEYS)[number], number>;
 
 const FIELD_DESCRIPTIONS: Record<(typeof PO_FIELD_KEYS)[number], string> = {
-  buyer_name: "Buyer / importer / consignee company name",
+  buyer_name: "Buyer / importer company name (the party that pays)",
   buyer_address: "Buyer's full address",
+  consignee_name: "Consignee — the party the goods are shipped TO, only if named and different from the buyer; else blank",
+  notify_party_name: "Notify party named on the document, only if stated and different from the buyer; else blank",
   destination_country: "Country the goods ship to",
   hs_code: "HS/HSN/tariff code, only if explicitly written",
   product_description: "Description of the goods",

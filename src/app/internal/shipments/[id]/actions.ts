@@ -2,6 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseAuthClient, getOperatorSession } from "@/lib/supabase/auth";
+import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
+
+const PARTY_KEYS = ["buyer_name", "consignee_name", "notify_party_name"];
 
 type SaveExtractionInput = {
   shipmentId: string;
@@ -111,6 +114,34 @@ export async function saveShipmentExtraction(
 
   if (audits.length > 0) {
     await supabase.from("audit_operator_action").insert(audits);
+  }
+
+  // If the operator changed a party name, re-run denied-party screening on the
+  // new names. A flag forces the shipment back to sanctions review regardless
+  // of the status they picked — a newly-entered party can't skip the check.
+  const prev = (current.extracted_data ?? {}) as Record<string, string>;
+  const partyChanged = PARTY_KEYS.some(
+    (k) => (prev[k] ?? "").trim() !== (cleanedExtracted[k] ?? "").trim()
+  );
+  if (partyChanged) {
+    try {
+      const screening = await screenShipmentParties(
+        input.shipmentId,
+        partiesFromExtracted(cleanedExtracted)
+      );
+      // Don't yank back a shipment the operator deliberately rejected — that's
+      // already a stronger decision than "needs screening".
+      if (screening.flagged && input.status !== "rejected") {
+        await supabase
+          .from("shipments")
+          .update({ status: "sanctions_screening" })
+          .eq("id", input.shipmentId);
+      }
+    } catch {
+      // Screening records its own audit note for handled outcomes; on a thrown
+      // failure, leave a no-PII breadcrumb but never block the save.
+      console.error("rescreen_threw", { shipmentId: input.shipmentId });
+    }
   }
 
   revalidatePath(`/internal/shipments/${input.shipmentId}`);

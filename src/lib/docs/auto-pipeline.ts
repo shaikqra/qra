@@ -8,7 +8,7 @@ import {
 import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
-import { screenShipmentBuyer } from "@/lib/screening/screen-shipment";
+import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 
 // Best-effort WhatsApp text to the shipment's customer. Returns whether the
 // message was sent so callers can surface a failed notification.
@@ -171,7 +171,7 @@ export async function runAutoPipeline(args: {
     // Denied-party screening on the buyer — deterministic list lookup.
     // A potential match (or a screening failure once configured) stops the
     // agent; the operator reviews the matches on the audit trail.
-    const screening = await screenShipmentBuyer(args.shipmentId, merged["buyer_name"] ?? "");
+    const screening = await screenShipmentParties(args.shipmentId, partiesFromExtracted(merged));
     if (!screening.proceed) {
       await setStatus("sanctions_screening");
       return;

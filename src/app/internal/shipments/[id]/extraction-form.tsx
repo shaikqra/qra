@@ -8,6 +8,8 @@ import { extractShipmentFields } from "./extract-action";
 const FIELDS: { key: string; label: string; placeholder: string }[] = [
   { key: "buyer_name", label: "Buyer name", placeholder: "e.g. Müller GmbH" },
   { key: "buyer_address", label: "Buyer address", placeholder: "Street, city, postal, country" },
+  { key: "consignee_name", label: "Consignee (if different)", placeholder: "Party goods ship to" },
+  { key: "notify_party_name", label: "Notify party (if any)", placeholder: "Notify party name" },
   { key: "destination_country", label: "Destination country", placeholder: "ISO code or name" },
   { key: "hs_code", label: "HS code", placeholder: "8-digit, e.g. 10063020" },
   { key: "product_description", label: "Product description", placeholder: "Goods being shipped" },
