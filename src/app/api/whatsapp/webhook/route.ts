@@ -23,6 +23,7 @@ import {
 } from "@/lib/docs/generate";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
+import { isAutoSendChaEnabled } from "@/lib/app-settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -409,6 +410,9 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
     // customer_approved for the operator to handle. The CHA is the next gate.
     after(async () => {
       try {
+        // Pilot mode (default): the operator reviews and sends to the CHA.
+        // Auto mode (operator-enabled in Settings): hand off automatically.
+        if (!(await isAutoSendChaEnabled())) return;
         // requireStatus claims customer_approved -> filed_with_cha so the CHA
         // is emailed exactly once even on a retry.
         const sent = await sendDocsToChaCore(shipmentId, null, "customer_approved");

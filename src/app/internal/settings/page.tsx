@@ -4,6 +4,8 @@ import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { ProfileForm } from "./profile-form";
 import { SanctionsRefresh } from "./sanctions-refresh";
 import { InviteButton } from "./invite-button";
+import { AutoChaToggle } from "./auto-cha-toggle";
+import { isAutoSendChaEnabled } from "@/lib/app-settings";
 import type { ExporterProfileInput } from "./actions";
 
 // The sanctions-list refresh fetches and parses large government files; give
@@ -40,6 +42,7 @@ export default async function SettingsPage({
   const customers = (customerRows ?? []) as CustomerRow[];
 
   const selected = customers.find((c) => c.id === selectedId) ?? null;
+  const autoChaEnabled = await isAutoSendChaEnabled();
 
   const profileQuery = supabase.from("exporter_profiles").select(PROFILE_COLUMNS);
   const { data } = selected
@@ -90,6 +93,8 @@ export default async function SettingsPage({
         customerId={selected?.id ?? null}
         initialCustomerName={selected?.display_name ?? ""}
       />
+
+      <AutoChaToggle initialEnabled={autoChaEnabled} />
 
       <SanctionsRefresh />
     </div>

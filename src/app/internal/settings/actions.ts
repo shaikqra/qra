@@ -4,6 +4,18 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseAuthClient, getOperatorSession } from "@/lib/supabase/auth";
 import { refreshAllLists, type RefreshResult } from "@/lib/screening/local-lists";
 import { createInvite } from "@/lib/onboarding";
+import { setAppSetting } from "@/lib/app-settings";
+
+// Operator: turn automatic CHA emailing on/off (default off = pilot mode).
+export async function setAutoSendCha(
+  enabled: boolean
+): Promise<{ ok: boolean }> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false };
+  const ok = await setAppSetting("auto_send_cha", enabled ? "true" : "false");
+  revalidatePath("/internal/settings");
+  return { ok };
+}
 
 // Operator: create a one-time onboarding link a customer fills their own
 // profile through. The operator copies the link and sends it to them.
