@@ -24,6 +24,7 @@ import {
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
+import { createInvite } from "@/lib/onboarding";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -74,7 +75,7 @@ async function getOrCreateCustomer(
   phoneHash: string,
   whatsappNumber: string,
   profileName: string
-): Promise<string | null> {
+): Promise<{ id: string; isNew: boolean } | null> {
   try {
     const supabase = createSupabaseServerClient();
     const name = profileName.trim().slice(0, 120) || null;
@@ -92,7 +93,7 @@ async function getOrCreateCustomer(
       if (Object.keys(patch).length > 0) {
         await supabase.from("customers").update(patch).eq("id", existing.id);
       }
-      return existing.id as string;
+      return { id: existing.id as string, isNew: false };
     }
     const { data: inserted, error } = await supabase
       .from("customers")
@@ -103,7 +104,7 @@ async function getOrCreateCustomer(
       console.error("customer_create_failed", { code: error?.code, message: error?.message });
       return null;
     }
-    return inserted.id as string;
+    return { id: inserted.id as string, isNew: true };
   } catch (err) {
     console.error("customer_lookup_exception", {
       name: err instanceof Error ? err.name : "unknown",
@@ -111,6 +112,24 @@ async function getOrCreateCustomer(
     });
     return null;
   }
+}
+
+// Welcome message with a one-time profile-setup link, for a brand-new exporter.
+// Falls back to a plain welcome if the link can't be created.
+async function onboardingWelcome(customerId: string): Promise<string> {
+  const invite = await createInvite(customerId);
+  if ("url" in invite) {
+    return (
+      "👋 Welcome to Qra! I turn your purchase orders into ready-to-file export " +
+      "documents, right here on WhatsApp.\n\n" +
+      `First, set up your company once (about 5 minutes) so your documents are complete:\n${invite.url}\n\n` +
+      "Then just send me a purchase order — PDF, photo, or text — and I'll prepare your documents."
+    );
+  }
+  return (
+    "👋 Welcome to Qra! Send me a purchase order — PDF, photo, or text — and I'll " +
+    "prepare your export documents. Our team will share your setup link shortly."
+  );
 }
 
 function generateShipmentReference(): string {
@@ -737,17 +756,29 @@ export async function POST(req: NextRequest) {
   }
 
   const phoneHash = hashPhone(from);
-  const customerId = await getOrCreateCustomer(phoneHash, from, params.ProfileName ?? "");
+  const customer = await getOrCreateCustomer(phoneHash, from, params.ProfileName ?? "");
 
-  if (!customerId) {
+  if (!customer) {
     return twimlResponse("Sorry, I'm having trouble setting up your profile. Please try again.");
   }
+  const customerId = customer.id;
+  const isNewCustomer = customer.isNew;
 
   if (numMedia > 0) {
     const mediaUrls: string[] = [];
     for (let i = 0; i < numMedia; i++) {
       const url = params[`MediaUrl${i}`];
       if (url) mediaUrls.push(url);
+    }
+
+    // A brand-new exporter who leads with a PO still needs to set up their
+    // company once, so append a one-time setup link to the acknowledgement.
+    let setupNote = "";
+    if (isNewCustomer) {
+      const invite = await createInvite(customerId);
+      if ("url" in invite) {
+        setupNote = `\n\nP.S. set up your company once so your documents are complete: ${invite.url}`;
+      }
     }
 
     const result = await handlePOSubmission({
@@ -780,17 +811,23 @@ export async function POST(req: NextRequest) {
         });
       });
       return twimlResponse(
-        `Got your PO! Reference: ${result.shipmentRef}. I'm reading it now and preparing your draft documents — they'll be ready for review in about a minute.`
+        `Got your PO! Reference: ${result.shipmentRef}. I'm reading it now and preparing your draft documents — they'll be ready for review in about a minute.${setupNote}`
       );
     }
 
     return twimlResponse(
-      `Got your PO! Saved ${result.fileCount} file(s). Shipment reference: ${result.shipmentRef}. Processing now.`
+      `Got your PO! Saved ${result.fileCount} file(s). Shipment reference: ${result.shipmentRef}. Processing now.${setupNote}`
     );
   }
 
   if (!body) {
     return twimlResponse("Sorry, I couldn't read your message. Please try again.");
+  }
+
+  // A brand-new exporter messaging for the first time gets a welcome + a
+  // one-time setup link, so they can fill their company profile.
+  if (isNewCustomer) {
+    return twimlResponse(await onboardingWelcome(customerId));
   }
 
   // Pending-shipment routing when a customer may have several live shipments.
