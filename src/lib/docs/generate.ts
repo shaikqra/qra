@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildCommercialInvoicePdf } from "@/lib/pdf/commercial-invoice";
 import { buildPackingListPdf } from "@/lib/pdf/packing-list";
 import { buildCertificateOfOriginPdf } from "@/lib/pdf/certificate-of-origin";
+import { buildShippingBillPackPdf } from "@/lib/pdf/shipping-bill-pack";
 
 // Shared document-generation engine. Called by the dashboard buttons
 // (generatedBy = operator id) and by the WhatsApp auto-pipeline
@@ -15,6 +16,8 @@ export type GenerateResult =
 const INVOICE_GENERATOR = "pdf-lib / commercial-invoice@v2";
 const PACKING_GENERATOR = "pdf-lib / packing-list@v1";
 const COO_GENERATOR = "pdf-lib / certificate-of-origin@v1";
+const PROFORMA_GENERATOR = "pdf-lib / proforma-invoice@v1";
+const SBPACK_GENERATOR = "pdf-lib / shipping-bill-pack@v1";
 
 const DEMO_SELLER = {
   name: "[Exporter — set in Settings]",
@@ -61,7 +64,12 @@ async function storeDocument(opts: {
   admin: ReturnType<typeof createSupabaseServerClient>;
   shipmentId: string;
   customerId: string;
-  docType: "commercial_invoice" | "packing_list" | "certificate_of_origin";
+  docType:
+    | "commercial_invoice"
+    | "packing_list"
+    | "certificate_of_origin"
+    | "proforma_invoice"
+    | "shipping_bill_pack";
   fileSlug: string;
   generator: string;
   pdfBytes: Uint8Array;
@@ -100,9 +108,12 @@ async function storeDocument(opts: {
   return { ok: true, storagePath, downloadUrl: signed?.signedUrl ?? "" };
 }
 
-export async function generateCommercialInvoiceCore(
+// Commercial invoice and proforma invoice share one data mapping — the
+// proforma differs only in title, note, number prefix and stored doc type.
+async function generateInvoiceVariantCore(
   shipmentId: string,
-  generatedBy: string | null
+  generatedBy: string | null,
+  variant: "commercial" | "proforma"
 ): Promise<GenerateResult> {
   const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
   if (!shipment) return { ok: false, error: "Shipment not found" };
@@ -122,8 +133,13 @@ export async function generateCommercialInvoiceCore(
     return { ok: false, error: `Fill these fields first: ${missing.join(", ")}` };
   }
 
+  const isProforma = variant === "proforma";
   const pdfBytes = await buildCommercialInvoicePdf({
-    invoiceNumber: `CI-${shipment.reference_number}`,
+    title: isProforma ? "PROFORMA INVOICE" : undefined,
+    titleNote: isProforma
+      ? "For quotation / advance payment — not a tax invoice."
+      : undefined,
+    invoiceNumber: `${isProforma ? "PI" : "CI"}-${shipment.reference_number}`,
     invoiceDate: new Date().toLocaleDateString("en-GB", {
       day: "2-digit",
       month: "short",
@@ -175,13 +191,27 @@ export async function generateCommercialInvoiceCore(
     admin,
     shipmentId,
     customerId: shipment.customer_id as string,
-    docType: "commercial_invoice",
-    fileSlug: "commercial-invoice",
-    generator: INVOICE_GENERATOR,
+    docType: isProforma ? "proforma_invoice" : "commercial_invoice",
+    fileSlug: isProforma ? "proforma-invoice" : "commercial-invoice",
+    generator: isProforma ? PROFORMA_GENERATOR : INVOICE_GENERATOR,
     pdfBytes,
     sourceData: d,
     generatedBy,
   });
+}
+
+export async function generateCommercialInvoiceCore(
+  shipmentId: string,
+  generatedBy: string | null
+): Promise<GenerateResult> {
+  return generateInvoiceVariantCore(shipmentId, generatedBy, "commercial");
+}
+
+export async function generateProformaInvoiceCore(
+  shipmentId: string,
+  generatedBy: string | null
+): Promise<GenerateResult> {
+  return generateInvoiceVariantCore(shipmentId, generatedBy, "proforma");
 }
 
 export async function generatePackingListCore(
@@ -304,6 +334,79 @@ export async function generateCertificateOfOriginCore(
     docType: "certificate_of_origin",
     fileSlug: "certificate-of-origin",
     generator: COO_GENERATOR,
+    pdfBytes,
+    sourceData: d,
+    generatedBy,
+  });
+}
+
+export async function generateShippingBillPackCore(
+  shipmentId: string,
+  generatedBy: string | null
+): Promise<GenerateResult> {
+  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  if (!shipment) return { ok: false, error: "Shipment not found" };
+
+  const get = (k: string) => (d[k] ?? "").trim();
+  const prof = (k: string) => (p[k] ?? "").trim();
+
+  // The CHA needs the full picture — require the invoice-level fields.
+  const required: [string, string][] = [
+    ["buyer_name", "Buyer name"],
+    ["product_description", "Product description"],
+    ["hs_code", "HS code"],
+    ["quantity", "Quantity"],
+    ["value_amount", "Invoice value"],
+    ["value_currency", "Currency"],
+    ["destination_country", "Destination country"],
+  ];
+  const missing = required.filter(([k]) => !get(k)).map(([, label]) => label);
+  if (missing.length > 0) {
+    return { ok: false, error: `Fill these fields first: ${missing.join(", ")}` };
+  }
+
+  const pdfBytes = await buildShippingBillPackPdf({
+    reference: shipment.reference_number as string,
+    date: new Date().toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+    invoiceRef: `CI-${shipment.reference_number}`,
+    exporter: {
+      name: prof("legal_name") || DEMO_SELLER.name,
+      address: prof("address"),
+      iec: prof("iec"),
+      gstin: prof("gstin"),
+    },
+    buyer: { name: get("buyer_name"), address: get("buyer_address") },
+    consignee: get("consignee_name") || undefined,
+    notifyParty: get("notify_party_name") || undefined,
+    destinationCountry: get("destination_country"),
+    portOfLoading: get("port_of_loading") || undefined,
+    portOfDischarge: get("port_of_discharge") || undefined,
+    incoterm: (get("incoterm") || prof("default_incoterm")).toUpperCase(),
+    hsCode: get("hs_code"),
+    productDescription: get("product_description"),
+    quantity: get("quantity"),
+    quantityUnit: get("quantity_unit"),
+    numberOfPackages: get("number_of_packages"),
+    packageType: get("package_type"),
+    netWeight: get("net_weight"),
+    grossWeight: get("gross_weight"),
+    weightUnit: get("weight_unit"),
+    invoiceValue: get("value_amount"),
+    currency: (get("value_currency") || prof("default_currency")).toUpperCase(),
+    rodtepIntent: !!prof("declaration_rodtep"),
+  });
+
+  return storeDocument({
+    admin,
+    shipmentId,
+    customerId: shipment.customer_id as string,
+    docType: "shipping_bill_pack",
+    fileSlug: "shipping-bill-pack",
+    generator: SBPACK_GENERATOR,
     pdfBytes,
     sourceData: d,
     generatedBy,

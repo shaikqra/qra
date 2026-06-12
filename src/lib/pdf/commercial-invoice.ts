@@ -4,6 +4,10 @@ import { toWinAnsi } from "./text";
 export type Party = { name: string; address: string };
 
 export type CommercialInvoiceData = {
+  // Title defaults to COMMERCIAL INVOICE; a proforma passes its own title and
+  // an explanatory note line (e.g. "not a tax invoice").
+  title?: string;
+  titleNote?: string;
   invoiceNumber: string;
   invoiceDate: string;
   contractRef?: string;
@@ -172,11 +176,17 @@ export async function buildCommercialInvoicePdf(data: CommercialInvoiceData): Pr
   };
 
   // --- header ---------------------------------------------------------------
-  text("COMMERCIAL INVOICE", MARGIN, y, 18, bold);
+  text(data.title ?? "COMMERCIAL INVOICE", MARGIN, y, 18, bold);
   textRight(`Invoice No.  ${data.invoiceNumber}`, RIGHT, y, 10, bold);
   textRight(`Date  ${data.invoiceDate}`, RIGHT, y - 14, 9, font, GREY);
   if (data.contractRef) textRight(`Contract  ${data.contractRef}`, RIGHT, y - 26, 8, font, GREY);
-  y -= 32;
+  if (data.titleNote) {
+    y -= 16;
+    text(data.titleNote, MARGIN, y, 9, bold, GREY);
+    y -= 16;
+  } else {
+    y -= 32;
+  }
   rule(y);
   y -= 22;
 

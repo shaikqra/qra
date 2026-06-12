@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { generateCommercialInvoice } from "./generate-invoice";
 import { generatePackingList } from "./generate-packing-list";
 import { generateCertificateOfOrigin } from "./generate-coo";
+import { generateProformaInvoice } from "./generate-proforma";
+import { generateShippingBillPack } from "./generate-sbpack";
 import { approveAndSendDocs } from "./send-docs";
 import { sendDocsToCha } from "./send-to-cha";
 
@@ -20,6 +22,8 @@ const DOC_LABELS: Record<string, string> = {
   commercial_invoice: "Commercial Invoice",
   packing_list: "Packing List",
   certificate_of_origin: "Certificate of Origin",
+  proforma_invoice: "Proforma Invoice",
+  shipping_bill_pack: "Shipping Bill Data Sheet (for CHA)",
 };
 
 export function InvoicePanel({
@@ -78,6 +82,22 @@ export function InvoicePanel({
           className="rounded-md border border-zinc-300 bg-white px-5 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
         >
           {pending ? "Generating…" : "Generate Certificate of Origin"}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleGenerate("Proforma invoice", generateProformaInvoice)}
+          disabled={pending}
+          className="rounded-md border border-zinc-300 bg-white px-5 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          {pending ? "Generating…" : "Generate Proforma Invoice"}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleGenerate("Shipping bill data sheet", generateShippingBillPack)}
+          disabled={pending}
+          className="rounded-md border border-zinc-300 bg-white px-5 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+        >
+          {pending ? "Generating…" : "Generate Shipping Bill Sheet"}
         </button>
         {docs.length > 0 && (
           <button
