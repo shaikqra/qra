@@ -2,6 +2,23 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseAuthClient, getOperatorSession } from "@/lib/supabase/auth";
+import { ingestUnList } from "@/lib/screening/local-lists";
+
+// Operator-triggered refresh of the locally-ingested denied-party lists (UN).
+export async function refreshSanctionsLists(): Promise<
+  { ok: true; count: number } | { ok: false; error: string }
+> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  try {
+    const { count } = await ingestUnList();
+    return { ok: true, count };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("refreshSanctionsLists failed:", msg);
+    return { ok: false, error: "Could not refresh the lists — try again in a moment." };
+  }
+}
 
 export type ExporterProfileInput = {
   legal_name: string;

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ensureOperator } from "../layout";
 import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { ProfileForm } from "./profile-form";
+import { SanctionsRefresh } from "./sanctions-refresh";
 import type { ExporterProfileInput } from "./actions";
 
 const PROFILE_COLUMNS =
@@ -82,6 +83,8 @@ export default async function SettingsPage({
         customerId={selected?.id ?? null}
         initialCustomerName={selected?.display_name ?? ""}
       />
+
+      <SanctionsRefresh />
     </div>
   );
 }

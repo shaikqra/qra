@@ -1,27 +1,67 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { screenPartyName, type ScreeningResult } from "./csl";
+import { screenPartyName } from "./csl";
+import { screenLocalName, localListStatus } from "./local-lists";
 
 // What this screening DOES and DOES NOT cover — recorded verbatim on every
 // audit note so the record is self-explanatory years later.
 const SCREENING_SCOPE = {
   screened_parties: "buyer, consignee, notify-party (when named)",
-  lists: "US Consolidated Screening List (~13 US lists incl. OFAC SDN)",
-  not_screened: ["EU consolidated", "UN consolidated", "India DGFT/SCOMET", "bank"],
+  lists: "US Consolidated Screening List (~13 US lists incl. OFAC SDN) + UN Security Council Consolidated List",
+  not_screened: ["EU consolidated", "India DGFT/SCOMET", "bank"],
 };
 
 export type ShipmentParty = { role: string; name: string };
 
-// Screen every named party on a shipment (buyer + consignee + notify, etc.)
-// against denied-party lists and record the outcome on the audit trail.
-// Returns whether the agent may proceed. Every non-clear outcome fails closed —
-// a match on ANY party, a lookup error (when configured), or screening not
-// configured all stop the pipeline: documents never auto-send unscreened.
+type PartyHit = {
+  role: string;
+  name: string;
+  provider: string;
+  matches: { name: string; list: string; score: number | null }[];
+};
+
+// Screen one party against every list (US CSL + local UN/etc). Returns its
+// matches and any provider that couldn't screen it.
+async function screenOneParty(
+  party: ShipmentParty
+): Promise<{ hits: PartyHit[]; unavailable: string[] }> {
+  const hits: PartyHit[] = [];
+  const unavailable: string[] = [];
+
+  const us = await screenPartyName(party.name);
+  if (us.status === "potential_match") {
+    hits.push({ role: party.role, name: party.name, provider: "US CSL", matches: us.matches });
+  } else if (us.status === "unchecked") {
+    unavailable.push("US CSL");
+  }
+
+  const local = await screenLocalName(party.name);
+  for (const p of local.uncheckedProviders) unavailable.push(p);
+  if (local.matches.length > 0) {
+    hits.push({
+      role: party.role,
+      name: party.name,
+      provider: "local",
+      matches: local.matches.map((m) => ({
+        name: m.full_name,
+        list: m.provider,
+        score: m.score,
+      })),
+    });
+  }
+  return { hits, unavailable };
+}
+
+// Screen every named party (buyer + consignee + notify) against all lists and
+// record the outcome on the audit trail. Every non-clear outcome fails closed.
 export async function screenShipmentParties(
   shipmentId: string,
   parties: ShipmentParty[]
 ): Promise<{ proceed: boolean; flagged: boolean }> {
   const admin = createSupabaseServerClient();
   const screenedAt = new Date().toISOString();
+  // Record how fresh each local list was at screening time, so staleness is
+  // provable from the audit record years later.
+  const listFreshness = await localListStatus();
 
   const note = async (newValue: Record<string, unknown>): Promise<boolean> => {
     const { error } = await admin.from("audit_operator_action").insert({
@@ -29,7 +69,12 @@ export async function screenShipmentParties(
       shipment_id: shipmentId,
       action_type: "note",
       old_value: null,
-      new_value: { ...newValue, scope: SCREENING_SCOPE, screened_at: screenedAt },
+      new_value: {
+        ...newValue,
+        scope: SCREENING_SCOPE,
+        screened_at: screenedAt,
+        local_list_freshness: listFreshness,
+      },
     });
     return !error;
   };
@@ -44,59 +89,48 @@ export async function screenShipmentParties(
   });
 
   if (toScreen.length === 0) {
-    // No screenable party name — cannot vouch for the shipment.
     await note({ event: "sanctions_screening_unavailable", reason: "no_party_name" });
     return { proceed: false, flagged: true };
   }
 
-  const matches: { role: string; name: string; result: ScreeningResult }[] = [];
-  let anyUnavailable = false;
+  const allHits: PartyHit[] = [];
+  const unavailable = new Set<string>();
   for (const party of toScreen) {
-    const result = await screenPartyName(party.name);
-    if (result.status === "potential_match") {
-      matches.push({ role: party.role, name: party.name, result });
-    } else if (result.status === "unchecked") {
-      anyUnavailable = true;
-    }
+    const { hits, unavailable: un } = await screenOneParty(party);
+    allHits.push(...hits);
+    for (const u of un) unavailable.add(u);
   }
 
-  if (matches.length > 0) {
+  if (allHits.length > 0) {
     const strongest = Math.max(
-      ...matches.flatMap((m) =>
-        m.result.status === "potential_match" ? m.result.matches.map((x) => x.score ?? 0) : [0]
-      )
+      ...allHits.flatMap((h) => h.matches.map((m) => m.score ?? 0)),
+      0
     );
     await note({
       event: "sanctions_potential_match",
-      provider: "trade.gov CSL (US lists incl. OFAC SDN)",
-      // Tiering is a triage signal for the operator, never a release decision:
+      // Tiering is an operator triage signal, never a release decision:
       // weak matches still stop the pipeline and still need a human.
-      match_strength: strongest >= 95 ? "strong" : "weak",
-      flagged_parties: matches.map((m) => ({
-        role: m.role,
-        name: m.name,
-        matches: m.result.status === "potential_match" ? m.result.matches : [],
-      })),
+      match_strength: strongest >= 0.95 ? "strong" : "weak",
+      flagged_parties: allHits,
     });
-    console.log("sanctions_match_flagged", { shipmentId, partyCount: matches.length });
+    console.log("sanctions_match_flagged", { shipmentId, partyCount: allHits.length });
     return { proceed: false, flagged: true };
   }
 
-  if (anyUnavailable) {
-    // Some party could not be screened (not configured, or lookup error).
-    // Fail closed — never auto-send a shipment with an unscreened party.
-    await note({ event: "sanctions_screening_unavailable", reason: "lookup_unavailable" });
+  if (unavailable.size > 0) {
+    await note({
+      event: "sanctions_screening_unavailable",
+      reason: "lists_unavailable",
+      providers: [...unavailable],
+    });
     console.log("sanctions_screening_unavailable", { shipmentId });
     return { proceed: false, flagged: true };
   }
 
   const recorded = await note({
     event: "sanctions_screened_clear",
-    provider: "trade.gov CSL (US lists incl. OFAC SDN)",
     parties_screened: toScreen.map((p) => p.role),
   });
-  // A clear we failed to record is not a clear we can stand behind — the audit
-  // row IS the compliance artifact.
   if (!recorded) {
     console.error("sanctions_clear_not_recorded", { shipmentId });
     return { proceed: false, flagged: true };
