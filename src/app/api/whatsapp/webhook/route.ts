@@ -8,6 +8,7 @@ import { runAutoPipeline } from "@/lib/docs/auto-pipeline";
 import type { SupportedMediaType } from "@/lib/ai/extract-po";
 import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
+import { screenShipmentBuyer } from "@/lib/screening/screen-shipment";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import {
   generateCommercialInvoiceCore,
@@ -478,6 +479,17 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
           lowConfidenceCount: shaky.length,
         });
         return `Thanks! I've noted the details for ${ref}. Our team will double-check everything and send your documents shortly.`;
+      }
+
+      // Denied-party screening on the buyer before the agent may act.
+      const screening = await screenShipmentBuyer(shipmentId, merged["buyer_name"] ?? "");
+      if (!screening.proceed) {
+        await supabase
+          .from("shipments")
+          .update({ status: "sanctions_screening" })
+          .eq("id", shipmentId)
+          .eq("status", "awaiting_customer_info");
+        return `Thanks! I've noted the details for ${ref}. Our team is running final compliance checks and will send your documents shortly.`;
       }
 
       // Atomic claim: only the request that actually flips the status gets to
