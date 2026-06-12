@@ -1,9 +1,16 @@
 import Link from "next/link";
 
-// Where the "Request access" buttons point. Change this to whichever inbox you
-// want enquiries to land in.
+// Where the email link points. Change to whichever inbox you want enquiries in.
 const CONTACT_EMAIL = "abdulalis@gmail.com";
 const MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Qra — early access")}`;
+
+// "Start on WhatsApp" opens a chat to Qra with the sandbox join code pre-filled.
+// IMPORTANT: set WHATSAPP_JOIN to your sandbox's EXACT join phrase from the
+// Twilio console (Messaging → Try it out → Send a WhatsApp message), e.g.
+// "join brave-tiger". Swap WHATSAPP_NUMBER when you get a production number.
+const WHATSAPP_NUMBER = "14155238886";
+const WHATSAPP_JOIN = "join your-sandbox-code";
+const WHATSAPP_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(WHATSAPP_JOIN)}`;
 
 const STEPS = [
   {
@@ -185,10 +192,12 @@ export default function Home() {
               FAQ
             </a>
             <a
-              href={MAILTO}
-              className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+              href={WHATSAPP_LINK}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
             >
-              Request access
+              Start on WhatsApp
             </a>
           </nav>
         </div>
@@ -211,10 +220,12 @@ export default function Home() {
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <a
-              href={MAILTO}
+              href={WHATSAPP_LINK}
+              target="_blank"
+              rel="noreferrer"
               className="rounded-full bg-emerald-600 px-6 py-3 text-sm font-medium text-white hover:bg-emerald-700"
             >
-              Request early access
+              Start on WhatsApp
             </a>
             <a
               href="#how"
@@ -224,7 +235,11 @@ export default function Home() {
             </a>
           </div>
           <p className="mt-6 text-sm text-zinc-500">
-            No new software for your team. No change to your customs broker.
+            No new software for your team. No change to your customs broker. Or{" "}
+            <a href={MAILTO} className="underline hover:text-zinc-700">
+              email us
+            </a>
+            .
           </p>
         </div>
         <WhatsAppMock />
@@ -373,15 +388,23 @@ export default function Home() {
           </h2>
           <p className="mt-4 text-zinc-600 max-w-xl mx-auto">
             We&apos;re working with a small group of Indian exporters to refine Qra. If your
-            team loses hours to documentation, send us a message — we&apos;ll run your next
-            shipment through it together.
+            team loses hours to documentation, message us on WhatsApp — we&apos;ll run your
+            next shipment through it together.
           </p>
-          <div className="mt-8">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <a
-              href={MAILTO}
+              href={WHATSAPP_LINK}
+              target="_blank"
+              rel="noreferrer"
               className="rounded-full bg-emerald-600 px-8 py-3 text-sm font-medium text-white hover:bg-emerald-700"
             >
-              Request early access
+              Start on WhatsApp
+            </a>
+            <a
+              href={MAILTO}
+              className="rounded-full border border-zinc-300 px-8 py-3 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+            >
+              Email us instead
             </a>
           </div>
         </div>
