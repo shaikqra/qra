@@ -5,6 +5,7 @@ import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ExtractionForm } from "./extraction-form";
 import { InvoicePanel } from "./invoice-panel";
+import { toActivities } from "./activity";
 
 type Shipment = {
   id: string;
@@ -100,6 +101,8 @@ export default async function ShipmentDetailPage({
     .limit(20);
 
   const auditTrail = (auditRows ?? []) as AuditRow[];
+  // Oldest-first, in plain English — the story of what the agent did.
+  const activities = toActivities([...auditTrail].reverse());
 
   const { data: genRows } = await supabase
     .from("generated_documents")
@@ -261,14 +264,33 @@ export default async function ShipmentDetailPage({
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-          Audit trail ({auditTrail.length})
+          Activity — what Qra did
         </h2>
-        {auditTrail.length === 0 ? (
+        {activities.length === 0 ? (
           <div className="rounded-md border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
-            No operator actions yet.
+            Nothing yet.
           </div>
         ) : (
-          <ol className="flex flex-col gap-2">
+          <ol className="rounded-md border border-zinc-200 bg-white divide-y divide-zinc-100">
+            {activities.map((a) => (
+              <li key={a.id} className="flex items-start gap-3 p-3">
+                <span className="text-base leading-6">{a.icon}</span>
+                <div className="flex-1">
+                  <div className={`text-sm font-medium ${a.tone}`}>{a.text}</div>
+                  <div className="text-xs text-zinc-400 mt-0.5">
+                    {a.actor} · {new Date(a.created_at).toLocaleString()}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        <details className="mt-3">
+          <summary className="text-xs text-zinc-400 cursor-pointer hover:text-zinc-600">
+            Technical audit log ({auditTrail.length})
+          </summary>
+          <ol className="flex flex-col gap-2 mt-2">
             {auditTrail.map((a) => (
               <li
                 key={a.id}
@@ -297,7 +319,7 @@ export default async function ShipmentDetailPage({
               </li>
             ))}
           </ol>
-        )}
+        </details>
       </section>
     </div>
   );
