@@ -3,6 +3,7 @@ import { ensureOperator } from "../layout";
 import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { ProfileForm } from "./profile-form";
 import { SanctionsRefresh } from "./sanctions-refresh";
+import { InviteButton } from "./invite-button";
 import type { ExporterProfileInput } from "./actions";
 
 // The sanctions-list refresh fetches and parses large government files; give
@@ -80,6 +81,8 @@ export default async function SettingsPage({
           </Link>
         ))}
       </div>
+
+      {selected && <InviteButton customerId={selected.id} />}
 
       <ProfileForm
         key={selected?.id ?? "default"}

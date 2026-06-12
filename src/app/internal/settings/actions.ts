@@ -3,6 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseAuthClient, getOperatorSession } from "@/lib/supabase/auth";
 import { refreshAllLists, type RefreshResult } from "@/lib/screening/local-lists";
+import { createInvite } from "@/lib/onboarding";
+
+// Operator: create a one-time onboarding link a customer fills their own
+// profile through. The operator copies the link and sends it to them.
+export async function inviteCustomerToOnboard(
+  customerId: string
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  const result = await createInvite(customerId);
+  if ("error" in result) return { ok: false, error: result.error };
+  return { ok: true, url: result.url };
+}
 
 // Operator-triggered refresh of the locally-ingested denied-party lists (UN, EU).
 export async function refreshSanctionsLists(): Promise<
@@ -20,27 +33,8 @@ export async function refreshSanctionsLists(): Promise<
   }
 }
 
-export type ExporterProfileInput = {
-  legal_name: string;
-  address: string;
-  factory_address: string;
-  cin: string;
-  gstin: string;
-  iec: string;
-  organic_code: string;
-  bank_name: string;
-  bank_branch: string;
-  bank_swift: string;
-  bank_account: string;
-  bank_beneficiary: string;
-  declaration_lut: string;
-  declaration_rodtep: string;
-  declaration_origin: string;
-  default_currency: string;
-  default_incoterm: string;
-  cha_name: string;
-  cha_email: string;
-};
+export type { ExporterProfileInput } from "@/lib/profile-fields";
+import type { ExporterProfileInput } from "@/lib/profile-fields";
 
 type Result = { ok: true } | { ok: false; error: string };
 
