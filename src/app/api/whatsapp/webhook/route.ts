@@ -730,29 +730,26 @@ export async function POST(req: NextRequest) {
     return twimlResponse("Sorry, I couldn't read your message. Please try again.");
   }
 
-  // If this customer has a shipment awaiting their approval, their text is an
-  // approve/change decision, not a general chat message.
+  // Pending-shipment routing when a customer may have several live shipments.
+  // An APPROVE-style keyword is an approval decision → approval handler first.
+  // Any other text is far more likely answering a gap-fill question we asked,
+  // so gap-fill takes precedence over the approval handler's change-request
+  // path. This stops an awaiting-approval shipment from swallowing a reply that
+  // was meant to fill another shipment's missing fields.
   try {
-    const approvalReply = await handleApprovalReply(customerId, body);
-    if (approvalReply) {
-      return twimlResponse(approvalReply);
+    if (isApprovalMessage(body)) {
+      const approvalReply = await handleApprovalReply(customerId, body);
+      if (approvalReply) return twimlResponse(approvalReply);
+      const gapFillReply = await handleGapFillReply(customerId, body);
+      if (gapFillReply) return twimlResponse(gapFillReply);
+    } else {
+      const gapFillReply = await handleGapFillReply(customerId, body);
+      if (gapFillReply) return twimlResponse(gapFillReply);
+      const approvalReply = await handleApprovalReply(customerId, body);
+      if (approvalReply) return twimlResponse(approvalReply);
     }
   } catch (err) {
-    console.error("approval_reply_failed", {
-      name: err instanceof Error ? err.name : "unknown",
-    });
-    // fall through to normal chat on error
-  }
-
-  // If a shipment is waiting on missing PO fields, treat their text as the
-  // answer to our gap-fill question.
-  try {
-    const gapFillReply = await handleGapFillReply(customerId, body);
-    if (gapFillReply) {
-      return twimlResponse(gapFillReply);
-    }
-  } catch (err) {
-    console.error("gap_fill_reply_failed", {
+    console.error("pending_reply_failed", {
       name: err instanceof Error ? err.name : "unknown",
     });
     // fall through to normal chat on error
