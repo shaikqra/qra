@@ -5,7 +5,8 @@ import {
   generateCommercialInvoiceCore,
   generatePackingListCore,
 } from "@/lib/docs/generate";
-import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
+import { missingRequiredFields } from "@/lib/docs/required-fields";
+import { missingFieldLines } from "@/lib/docs/gap-message";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
@@ -120,7 +121,7 @@ export async function runAutoPipeline(args: {
           admin,
           shipRow.customer_id as string,
           `I've read your PO (ref ${shipRow.reference_number}). To finish your documents I still need:\n` +
-            labelsFor(missing).map((l) => `• ${l}`).join("\n") +
+            missingFieldLines(missing, merged).join("\n") +
             `\nJust reply with the details here.`
         );
         if (!notified) {

@@ -17,6 +17,8 @@ const FIELDS: { key: string; label: string; placeholder: string }[] = [
   { key: "quantity_unit", label: "Unit", placeholder: "kg, MT, pcs" },
   { key: "value_amount", label: "Invoice value", placeholder: "Amount" },
   { key: "value_currency", label: "Currency", placeholder: "USD, EUR, INR" },
+  { key: "unit_price", label: "Unit price", placeholder: "Per-unit rate" },
+  { key: "unit_price_basis", label: "Unit price basis", placeholder: "e.g. 1000 kg, kg, MT" },
   { key: "incoterm", label: "Incoterm", placeholder: "FOB, CIF, EXW" },
   { key: "number_of_packages", label: "No. of packages", placeholder: "e.g. 500" },
   { key: "package_type", label: "Package type", placeholder: "bags, cartons, pallets" },

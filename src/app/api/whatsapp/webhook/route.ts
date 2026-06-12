@@ -6,7 +6,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hashPhone } from "@/lib/hash";
 import { runAutoPipeline } from "@/lib/docs/auto-pipeline";
 import type { SupportedMediaType } from "@/lib/ai/extract-po";
-import { missingRequiredFields, labelsFor } from "@/lib/docs/required-fields";
+import { missingRequiredFields } from "@/lib/docs/required-fields";
+import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
+import { computeProposedValue } from "@/lib/docs/compute-value";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
@@ -417,6 +419,17 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
   }
 
   const found = await parseGapReply(body.slice(0, 1000), missing);
+  // Computed-value confirmation: if the invoice value is still missing and the
+  // customer simply confirmed, fill it with the deterministic computation from
+  // the stated unit price. Never override an explicit number they sent.
+  let valueComputed = false;
+  if (!found["value_amount"] && missing.includes("value_amount") && isValueConfirmation(body)) {
+    const computed = computeProposedValue({ ...current, ...found });
+    if (computed) {
+      found["value_amount"] = computed.amount;
+      valueComputed = true;
+    }
+  }
   const foundCount = Object.keys(found).length;
 
   if (foundCount > 0) {
@@ -434,6 +447,20 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
       old_value: current,
       new_value: merged,
     });
+
+    // Provenance: a computed-and-confirmed value wasn't printed on the PO.
+    if (valueComputed) {
+      await supabase.from("audit_operator_action").insert({
+        operator_id: null,
+        shipment_id: shipmentId,
+        action_type: "note",
+        old_value: null,
+        new_value: {
+          event: "value_amount_computed_and_confirmed",
+          value: merged["value_amount"],
+        },
+      });
+    }
 
     const stillMissing = missingRequiredFields(merged);
     console.log("gap_fill_reply_processed", {
@@ -540,7 +567,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
 
     return (
       `Thanks — noted for ${ref}. I still need:\n` +
-      labelsFor(stillMissing).map((l) => `• ${l}`).join("\n") +
+      missingFieldLines(stillMissing, merged).join("\n") +
       `\nJust reply with the details here.`
     );
   }
@@ -548,7 +575,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
   // Nothing usable in the reply — repeat the ask.
   return (
     `Thanks for your message about ${ref}. To finish your documents I still need:\n` +
-    labelsFor(missing).map((l) => `• ${l}`).join("\n") +
+    missingFieldLines(missing, current).join("\n") +
     `\nJust reply with the details here.`
   );
 }
