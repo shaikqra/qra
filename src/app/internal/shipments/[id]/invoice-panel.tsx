@@ -133,9 +133,7 @@ export function InvoicePanel({
                 if (result.ok) {
                   setMessage({
                     ok: true,
-                    text:
-                      result.warning ??
-                      `Emailed ${result.sent} document(s) to the CHA — status set to filed with CHA.`,
+                    text: `Emailed ${result.sent} document(s) to the CHA — status set to filed with CHA.`,
                   });
                   router.refresh();
                 } else {

@@ -22,6 +22,7 @@ import {
   generatePackingListCore,
 } from "@/lib/docs/generate";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
+import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -401,7 +402,34 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
     });
 
     console.log("customer_approval_recorded", { shipmentId, approvedCount });
-    return `✅ Thank you! Your documents for ${ref} are approved and locked. We'll proceed with your shipment from here.`;
+
+    // Agentic handoff: the customer's approval authorises sending the set to
+    // their customs broker. Done in the background so the reply is instant; if
+    // no CHA email is set (or the send fails) the shipment stays at
+    // customer_approved for the operator to handle. The CHA is the next gate.
+    after(async () => {
+      try {
+        // requireStatus claims customer_approved -> filed_with_cha so the CHA
+        // is emailed exactly once even on a retry.
+        const sent = await sendDocsToChaCore(shipmentId, null, "customer_approved");
+        const benign = sent.ok || ["no_cha_email", "not_configured", "already_sent"].includes(
+          (sent as { reason?: string }).reason ?? ""
+        );
+        if (!benign) {
+          console.error("auto_cha_send_failed", {
+            shipmentId,
+            reason: (sent as { reason?: string }).reason,
+          });
+        }
+      } catch (err) {
+        console.error("auto_cha_send_threw", {
+          shipmentId,
+          name: err instanceof Error ? err.name : "unknown",
+        });
+      }
+    });
+
+    return `✅ Thank you! Your documents for ${ref} are approved and locked. We'll send them to your customs broker and proceed with your shipment.`;
   }
 
   // Not a clear "yes". Don't bounce the shipment — a "hi" or "thanks" must not
