@@ -5,7 +5,12 @@ import { createHash, randomBytes } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hashPhone } from "@/lib/hash";
 import { runAutoPipeline } from "@/lib/docs/auto-pipeline";
-import type { SupportedMediaType } from "@/lib/ai/extract-po";
+import {
+  extractPoFields,
+  extractPoFieldsFromText,
+  type SupportedMediaType,
+} from "@/lib/ai/extract-po";
+import { isOrderMessage } from "@/lib/ai/classify-order";
 import { missingRequiredFields } from "@/lib/docs/required-fields";
 import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
 import { computeProposedValue } from "@/lib/docs/compute-value";
@@ -580,6 +585,39 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
   );
 }
 
+// Create a shipment from an order sent as plain text (no PDF). The order text
+// is stored as the shipment's customer note and is the source for extraction.
+async function createTextOrderShipment(
+  customerId: string,
+  body: string
+): Promise<{ shipmentId: string; shipmentRef: string } | null> {
+  const supabase = createSupabaseServerClient();
+  const shipmentRef = generateShipmentReference();
+  const { data: shipment, error } = await supabase
+    .from("shipments")
+    .insert({
+      customer_id: customerId,
+      reference_number: shipmentRef,
+      customer_po_number: body.slice(0, 300),
+      status: "po_received",
+    })
+    .select("id")
+    .single();
+  if (error || !shipment) {
+    console.error("text_order_shipment_create_failed", { code: error?.code });
+    return null;
+  }
+  const shipmentId = shipment.id as string;
+  await supabase.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "order_source", source: "whatsapp_text" },
+  });
+  return { shipmentId, shipmentRef };
+}
+
 export async function POST(req: NextRequest) {
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
   const configuredUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
@@ -670,11 +708,12 @@ export async function POST(req: NextRequest) {
     const readable = result.firstReadable;
     if (readable) {
       const shipmentId = result.shipmentId;
+      const base64 = readable.base64;
+      const mediaType = readable.mediaType;
       after(async () => {
         await runAutoPipeline({
           shipmentId,
-          fileBase64: readable.base64,
-          mediaType: readable.mediaType,
+          extract: () => extractPoFields(base64, mediaType),
         });
       });
       return twimlResponse(
@@ -714,6 +753,51 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) {
     console.error("gap_fill_reply_failed", {
+      name: err instanceof Error ? err.name : "unknown",
+    });
+    // fall through to normal chat on error
+  }
+
+  // No pending shipment matched. Is this a NEW order typed as text (no PDF)?
+  // A cheap classifier gates the expensive extraction so chit-chat stays chat.
+  try {
+    if (await isOrderMessage(body)) {
+      // Dedupe: if the identical order text already created a shipment in the
+      // last 10 minutes (a resend or a Twilio retry), don't make another.
+      const dedupe = createSupabaseServerClient();
+      const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: dup } = await dedupe
+        .from("shipments")
+        .select("reference_number")
+        .eq("customer_id", customerId)
+        .eq("customer_po_number", body.slice(0, 300))
+        .gte("created_at", cutoff)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (dup) {
+        return twimlResponse(
+          `I've already got that order (ref ${dup.reference_number}) and I'm working on it — your documents will arrive here shortly.`
+        );
+      }
+
+      const created = await createTextOrderShipment(customerId, body);
+      if (created) {
+        const orderText = body;
+        const shipmentId = created.shipmentId;
+        after(async () => {
+          await runAutoPipeline({
+            shipmentId,
+            extract: () => extractPoFieldsFromText(orderText),
+          });
+        });
+        return twimlResponse(
+          `Got your order! Reference: ${created.shipmentRef}. I'm reading it now and preparing your draft documents — ready for review in about a minute. If anything's missing I'll ask you here.`
+        );
+      }
+    }
+  } catch (err) {
+    console.error("text_order_failed", {
       name: err instanceof Error ? err.name : "unknown",
     });
     // fall through to normal chat on error

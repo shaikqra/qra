@@ -1,6 +1,6 @@
 import twilio from "twilio";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { extractPoFields, type SupportedMediaType } from "@/lib/ai/extract-po";
+import type { PoFields, PoConfidence } from "@/lib/ai/extract-po";
 import {
   generateCommercialInvoiceCore,
   generatePackingListCore,
@@ -53,8 +53,7 @@ async function sendWhatsAppText(
 
 export async function runAutoPipeline(args: {
   shipmentId: string;
-  fileBase64: string;
-  mediaType: SupportedMediaType;
+  extract: () => Promise<{ fields: PoFields; confidence: PoConfidence }>;
 }): Promise<void> {
   const admin = createSupabaseServerClient();
 
@@ -82,7 +81,7 @@ export async function runAutoPipeline(args: {
   try {
     await setStatus("data_extracting");
 
-    const { fields, confidence } = await extractPoFields(args.fileBase64, args.mediaType);
+    const { fields, confidence } = await args.extract();
 
     // Merge non-empty extracted values over whatever already exists.
     const { data: ship } = await admin

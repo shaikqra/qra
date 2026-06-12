@@ -117,6 +117,27 @@ function buildExtractTool(): Anthropic.Tool {
 // missing. Treat any "no data" marker as blank so it never pollutes the form.
 const NO_DATA = /^(<?\s*unknown\s*>?|n\/?a|none|null|nil|not\s+(stated|available|specified|mentioned|provided|found)|tbd|[-—.]+)$/i;
 
+function parseExtractTool(message: Anthropic.Message): {
+  fields: PoFields;
+  confidence: PoConfidence;
+} {
+  const toolUse = message.content.find(
+    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+  );
+  const raw = (toolUse?.input ?? {}) as Record<string, unknown>;
+
+  const fields = {} as PoFields;
+  const confidence = {} as PoConfidence;
+  for (const key of PO_FIELD_KEYS) {
+    const entry = (raw[key] ?? {}) as { value?: unknown; confidence?: unknown };
+    const cleaned = typeof entry.value === "string" ? entry.value.trim() : "";
+    fields[key] = NO_DATA.test(cleaned) ? "" : cleaned;
+    const c = typeof entry.confidence === "number" ? entry.confidence : 0;
+    confidence[key] = Math.max(0, Math.min(1, c));
+  }
+  return { fields, confidence };
+}
+
 // Read a single export document (PDF or image) and return extracted fields
 // plus a per-field confidence map.
 export async function extractPoFields(
@@ -145,19 +166,27 @@ export async function extractPoFields(
     ],
   });
 
-  const toolUse = message.content.find(
-    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-  );
-  const raw = (toolUse?.input ?? {}) as Record<string, unknown>;
+  return parseExtractTool(message);
+}
 
-  const fields = {} as PoFields;
-  const confidence = {} as PoConfidence;
-  for (const key of PO_FIELD_KEYS) {
-    const entry = (raw[key] ?? {}) as { value?: unknown; confidence?: unknown };
-    const cleaned = typeof entry.value === "string" ? entry.value.trim() : "";
-    fields[key] = NO_DATA.test(cleaned) ? "" : cleaned;
-    const c = typeof entry.confidence === "number" ? entry.confidence : 0;
-    confidence[key] = Math.max(0, Math.min(1, c));
-  }
-  return { fields, confidence };
+// Read an order sent as plain text (a WhatsApp message or email body, not a
+// file) and return the same extracted fields + confidence map.
+export async function extractPoFieldsFromText(
+  text: string
+): Promise<{ fields: PoFields; confidence: PoConfidence }> {
+  const message = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 2500,
+    system: SYSTEM_PROMPT,
+    tools: [buildExtractTool()],
+    tool_choice: { type: "tool", name: "record_po_fields" },
+    messages: [
+      {
+        role: "user",
+        content: `Extract the export shipment fields from this order message:\n\n${text.slice(0, 4000)}`,
+      },
+    ],
+  });
+
+  return parseExtractTool(message);
 }
