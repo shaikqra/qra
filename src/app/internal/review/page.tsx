@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ensureOperator } from "../layout";
 import { createSupabaseAuthClient } from "@/lib/supabase/auth";
+import { localListStatus } from "@/lib/screening/local-lists";
 
 // Shipments that need an operator's attention, in one place, worst first.
 const ATTENTION_STATUSES = [
@@ -102,12 +103,31 @@ export default async function ReviewQueuePage() {
     .map((s) => ({ s, reason: reasonFor(s.status, latestNote.get(s.id)) }))
     .sort((a, b) => a.reason.priority - b.reason.priority);
 
+  // Warn if a sanctions list isn't loaded/fresh — until it is, shipments park.
+  const listStatus = await localListStatus();
+  const notLoaded = Object.entries(listStatus)
+    .filter(([, v]) => !v.loaded)
+    .map(([p]) => p);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Review queue</h1>
         <span className="text-sm text-zinc-500">{rows.length} need attention</span>
       </div>
+
+      {notLoaded.length > 0 && (
+        <div className="mb-4 rounded-md border border-orange-200 bg-orange-50 p-4 text-sm text-orange-800">
+          <span className="font-medium">
+            {notLoaded.join(" + ")} sanctions list{notLoaded.length > 1 ? "s" : ""} not loaded or out of date.
+          </span>{" "}
+          Shipments will wait in sanctions screening until you refresh.{" "}
+          <Link href="/internal/settings" className="underline hover:text-orange-900">
+            Refresh in Settings
+          </Link>
+          .
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <div className="rounded-md border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500">

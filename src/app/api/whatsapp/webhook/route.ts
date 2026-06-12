@@ -184,6 +184,16 @@ function extensionFromContentType(ct: string): string {
   return "bin";
 }
 
+type POSubmissionResult =
+  | { duplicate: true; shipmentRef: string }
+  | {
+      duplicate: false;
+      shipmentRef: string;
+      fileCount: number;
+      shipmentId: string;
+      firstReadable: { base64: string; mediaType: SupportedMediaType } | null;
+    };
+
 async function handlePOSubmission({
   customerId,
   mediaUrls,
@@ -192,16 +202,53 @@ async function handlePOSubmission({
   customerId: string;
   mediaUrls: string[];
   messageBody: string;
-}): Promise<{
-  shipmentRef: string;
-  fileCount: number;
-  shipmentId: string;
-  firstReadable: { base64: string; mediaType: SupportedMediaType } | null;
-} | null> {
+}): Promise<POSubmissionResult | null> {
   const supabase = createSupabaseServerClient();
-  const shipmentRef = generateShipmentReference();
-  console.log("po_submission_start", { customerId, mediaUrlCount: mediaUrls.length, shipmentRef });
+  console.log("po_submission_start", { customerId, mediaUrlCount: mediaUrls.length });
 
+  // Download every attachment up front (usually one) and fingerprint each.
+  const downloaded: { bytes: Buffer; contentType: string; sha256: string }[] = [];
+  for (const url of mediaUrls) {
+    if (!url) continue;
+    const media = await downloadTwilioMedia(url);
+    if (!media) continue;
+    downloaded.push({
+      bytes: media.bytes,
+      contentType: media.contentType,
+      sha256: createHash("sha256").update(media.bytes).digest("hex"),
+    });
+  }
+
+  // Dedup ONLY a single-file message whose fingerprint matches one this
+  // customer sent in the last 90 seconds — that's a Twilio retry or an
+  // accidental double-tap, not a deliberate re-order. We deliberately do NOT
+  // dedup multi-file messages (a corrected page would be lost) or anything
+  // older (a genuine repeat order of the same goods must create a new shipment).
+  if (downloaded.length === 1) {
+    const cutoff = new Date(Date.now() - 90 * 1000).toISOString();
+    const { data: prior } = await supabase
+      .from("audit_po_ingest")
+      .select("shipment_id")
+      .eq("customer_id", customerId)
+      .eq("file_sha256", downloaded[0].sha256)
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (prior) {
+      const { data: existing } = await supabase
+        .from("shipments")
+        .select("reference_number")
+        .eq("id", prior.shipment_id as string)
+        .maybeSingle();
+      if (existing) {
+        console.log("po_submission_duplicate", { shipmentId: prior.shipment_id });
+        return { duplicate: true, shipmentRef: existing.reference_number as string };
+      }
+    }
+  }
+
+  const shipmentRef = generateShipmentReference();
   const { data: shipment, error: shipErr } = await supabase
     .from("shipments")
     .insert({
@@ -223,49 +270,27 @@ async function handlePOSubmission({
   let storedCount = 0;
   let firstReadable: { base64: string; mediaType: SupportedMediaType } | null = null;
 
-  for (let i = 0; i < mediaUrls.length; i++) {
-    const url = mediaUrls[i];
-    if (!url) {
-      console.warn("media_url_empty", { index: i });
-      continue;
-    }
-    console.log("processing_media", { index: i });
-    const media = await downloadTwilioMedia(url);
-    if (!media) {
-      console.warn("media_download_returned_null", { index: i });
-      continue;
-    }
-
-    const sha256 = createHash("sha256").update(media.bytes).digest("hex");
+  for (let i = 0; i < downloaded.length; i++) {
+    const media = downloaded[i];
     const ext = extensionFromContentType(media.contentType);
-    const storagePath = `${customerId}/${shipmentId}/${sha256.slice(0, 16)}-${i}.${ext}`;
-    console.log("uploading_to_storage", { storagePath, bytes: media.bytes.length, contentType: media.contentType
-  });
+    const storagePath = `${customerId}/${shipmentId}/${media.sha256.slice(0, 16)}-${i}.${ext}`;
 
     const { error: uploadErr } = await supabase.storage
       .from("purchase-orders")
-      .upload(storagePath, media.bytes, {
-        contentType: media.contentType,
-        upsert: false,
-      });
+      .upload(storagePath, media.bytes, { contentType: media.contentType, upsert: false });
 
     if (uploadErr) {
-      console.error("storage_upload_failed", {
-        name: uploadErr.name,
-        message: uploadErr.message,
-      });
+      console.error("storage_upload_failed", { name: uploadErr.name, message: uploadErr.message });
       continue;
     }
-    console.log("storage_upload_success", { storagePath });
 
     const { error: auditErr } = await supabase.from("audit_po_ingest").insert({
       customer_id: customerId,
       shipment_id: shipmentId,
       storage_path: storagePath,
-      file_sha256: sha256,
+      file_sha256: media.sha256,
       source: "whatsapp",
     });
-
     if (auditErr) {
       console.error("audit_log_failed", { code: auditErr.code, message: auditErr.message });
     }
@@ -286,7 +311,7 @@ async function handlePOSubmission({
   }
 
   console.log("po_submission_complete", { storedCount, totalUrls: mediaUrls.length });
-  return { shipmentRef, fileCount: storedCount, shipmentId, firstReadable };
+  return { duplicate: false, shipmentRef, fileCount: storedCount, shipmentId, firstReadable };
 }
 
 // Short affirmations that count as a clear "yes, approved". We deliberately
@@ -701,6 +726,12 @@ export async function POST(req: NextRequest) {
 
     if (!result) {
       return twimlResponse("I received your file but had trouble storing it. Please try sending again.");
+    }
+
+    if (result.duplicate) {
+      return twimlResponse(
+        `I've already got that document (ref ${result.shipmentRef}) and I'm working on it — your documents will arrive here shortly.`
+      );
     }
 
     // Kick off the auto-pipeline AFTER the reply is sent: AI extraction ->
