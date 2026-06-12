@@ -9,7 +9,7 @@ const MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Qra — ea
 // Twilio console (Messaging → Try it out → Send a WhatsApp message), e.g.
 // "join brave-tiger". Swap WHATSAPP_NUMBER when you get a production number.
 const WHATSAPP_NUMBER = "14155238886";
-const WHATSAPP_JOIN = "join your-sandbox-code";
+const WHATSAPP_JOIN = "join solve-scale";
 const WHATSAPP_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(WHATSAPP_JOIN)}`;
 
 const STEPS = [
