@@ -18,11 +18,12 @@ export function isValidChaEmail(email: string): boolean {
 export function cleanChaList(raw: ChaContactInput[] | undefined): CleanCha[] {
   const rows: CleanCha[] = (raw ?? [])
     .map((c) => {
-      const email = (c?.email ?? "").toString().trim().slice(0, 200);
+      const email = (c?.email ?? "").toString().trim().toLowerCase().slice(0, 200);
       return {
         name: (c?.name ?? "").toString().trim().slice(0, 200),
         // Drop a malformed address rather than store one that will bounce later;
-        // an empty email just means "no automatic send to this broker".
+        // an empty email just means "no automatic send to this broker". Stored
+        // lower-cased so the broker's login email matches reliably.
         email: email && isValidChaEmail(email) ? email : "",
         port: (c?.port ?? "").toString().trim().slice(0, 100),
         is_default: !!c?.is_default,

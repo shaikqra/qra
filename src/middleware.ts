@@ -45,6 +45,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(dashUrl);
   }
 
+  // CHA seat: must be signed in. We don't redirect signed-in users away from the
+  // broker login (a logged-in non-broker would loop) — the /cha layout checks
+  // the broker role and shows a friendly message instead.
+  const isCha = pathname.startsWith("/cha");
+  const isChaLogin = pathname === "/cha/login";
+  if (isCha && !isChaLogin && !user) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/cha/login";
+    return NextResponse.redirect(loginUrl);
+  }
+
   return response;
 }
 
