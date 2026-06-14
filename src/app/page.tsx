@@ -419,6 +419,9 @@ export default function Home() {
             <a href={MAILTO} className="hover:text-zinc-900">
               {CONTACT_EMAIL}
             </a>
+            <Link href="/cha/login" className="text-zinc-400 hover:text-zinc-700 text-xs">
+              Broker sign-in
+            </Link>
             <Link href="/internal/login" className="text-zinc-300 hover:text-zinc-500 text-xs">
               Team login
             </Link>
