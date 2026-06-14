@@ -8,11 +8,11 @@ export default async function ChaLayout({ children }: { children: React.ReactNod
   const session = await getChaSession();
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 text-zinc-900">
-      <header className="bg-[#101f3d] text-white">
+      <header className="bg-emerald-900 text-white">
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link href="/cha" className="font-extrabold tracking-tight">
-            Q<span className="text-[#E0BE55]">ra</span>
-            <span className="font-normal text-white/55 text-sm ml-2">· Broker desk</span>
+            Q<span className="text-emerald-300">ra</span>
+            <span className="font-normal text-emerald-200/80 text-sm ml-2">· CHA desk</span>
           </Link>
           {session && (
             <div className="flex items-center gap-3 text-sm">

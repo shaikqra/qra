@@ -1,6 +1,6 @@
 import { LoginForm } from "@/app/internal/login/login-form";
 
-// Broker sign-in — same magic-link mechanism as the operator login, but it
+// CHA sign-in — same magic-link mechanism as the operator login, but it
 // redirects into /cha after the link is used.
 export default async function ChaLoginPage({
   searchParams,
@@ -10,7 +10,7 @@ export default async function ChaLoginPage({
   const params = await searchParams;
   return (
     <div className="max-w-md mx-auto mt-10">
-      <h1 className="text-2xl font-semibold tracking-tight mb-2">Broker sign-in</h1>
+      <h1 className="text-2xl font-semibold tracking-tight mb-2">CHA sign-in</h1>
       <p className="text-sm text-zinc-600 mb-6">
         Enter the email your exporter has on file for you and we&apos;ll send a one-tap sign-in
         link.

@@ -420,7 +420,7 @@ export default function Home() {
               {CONTACT_EMAIL}
             </a>
             <Link href="/cha/login" className="text-zinc-400 hover:text-zinc-700 text-xs">
-              Broker sign-in
+              CHA sign-in
             </Link>
             <Link href="/internal/login" className="text-zinc-300 hover:text-zinc-500 text-xs">
               Team login

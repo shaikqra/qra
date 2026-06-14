@@ -31,7 +31,7 @@ export function ChaActions({ shipmentId }: { shipmentId: string }) {
         onChange={(e) => setNote(e.target.value)}
         rows={2}
         placeholder="Optional note — or, to request changes, say what needs fixing"
-        className="rounded-md border border-zinc-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1F3864]"
+        className="rounded-md border border-zinc-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
       />
       <div className="flex flex-wrap gap-2">
         <button

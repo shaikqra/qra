@@ -116,10 +116,10 @@ export default async function ChaShipmentPage({ params }: { params: Promise<{ id
                 href={file.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 hover:border-[#C9A227] hover:bg-[#fffdf5]"
+                className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 hover:border-emerald-300 hover:bg-emerald-50"
               >
                 <span className="text-lg">📄</span>
-                <span className="text-sm font-semibold text-[#1F3864]">{file.label}</span>
+                <span className="text-sm font-semibold text-emerald-800">{file.label}</span>
                 <span className="ml-auto text-xs font-semibold text-zinc-500">Open ↗</span>
               </a>
             ))}

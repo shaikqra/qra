@@ -51,10 +51,10 @@ function Card({ r }: { r: Row }) {
   return (
     <Link
       href={`/cha/${r.id}`}
-      className="block rounded-xl border border-zinc-200 bg-white p-4 hover:border-[#C9A227] hover:bg-[#fffdf5] transition-colors"
+      className="block rounded-xl border border-zinc-200 bg-white p-4 hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
     >
       <div className="flex items-center gap-2">
-        <span className="font-mono text-xs font-bold text-[#1F3864]">{r.reference_number}</span>
+        <span className="font-mono text-xs font-bold text-zinc-900">{r.reference_number}</span>
         <span className="text-sm font-semibold text-zinc-800">· {exporterName(r)}</span>
         <span className="ml-auto text-xs font-semibold">
           {filed ? (
@@ -62,7 +62,7 @@ function Card({ r }: { r: Row }) {
           ) : changes ? (
             <span className="text-amber-600">Changes requested</span>
           ) : (
-            <span className="text-[#1F3864]">Review →</span>
+            <span className="text-emerald-700">Review →</span>
           )}
         </span>
       </div>
@@ -100,7 +100,7 @@ export default async function ChaHome() {
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-          Needs your action {todo.length > 0 && <span className="text-[#C9A227]">· {todo.length}</span>}
+          Needs your action {todo.length > 0 && <span className="text-emerald-600">· {todo.length}</span>}
         </h2>
         {todo.length === 0 ? (
           <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500">
