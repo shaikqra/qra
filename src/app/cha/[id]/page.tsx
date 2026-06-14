@@ -4,6 +4,7 @@ import { ensureCha } from "@/lib/supabase/cha-auth";
 import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ChaActions } from "./cha-actions";
+import { DocReview } from "./doc-review";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +127,8 @@ export default async function ChaShipmentPage({ params }: { params: Promise<{ id
           </div>
         )}
       </section>
+
+      <DocReview shipmentId={ship.id} />
 
       {filed ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
