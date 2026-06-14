@@ -7,6 +7,7 @@ import { InviteButton } from "./invite-button";
 import { AutoChaToggle } from "./auto-cha-toggle";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
 import { listChaContacts } from "@/lib/cha-contacts";
+import { getOrCreateInboundToken, inboundAddressFor } from "@/lib/email/inbound";
 import type { ExporterProfileInput } from "./actions";
 
 // The sanctions-list refresh fetches and parses large government files; give
@@ -53,6 +54,10 @@ export default async function SettingsPage({
   // CHAs are per-customer; the default profile has none.
   const initialChas = selected ? await listChaContacts(supabase, selected.id) : [];
 
+  // The exporter's secret PO-forwarding address (generated once, on first view).
+  const inboundToken = selected ? await getOrCreateInboundToken(selected.id) : null;
+  const inboundAddress = inboundToken ? inboundAddressFor(inboundToken) : null;
+
   const pill = (active: boolean) =>
     `rounded-full px-3 py-1.5 text-xs font-medium border ${
       active
@@ -90,6 +95,19 @@ export default async function SettingsPage({
       </div>
 
       {selected && <InviteButton customerId={selected.id} />}
+
+      {selected && inboundAddress && (
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <div className="text-sm font-medium text-zinc-700">PO email address</div>
+          <p className="text-xs text-zinc-500 mt-0.5 mb-2">
+            This exporter sets an auto-forward rule sending buyer POs here — Qra then starts the
+            shipment automatically.
+          </p>
+          <code className="text-xs bg-white border border-zinc-200 rounded px-2 py-1 break-all">
+            {inboundAddress}
+          </code>
+        </div>
+      )}
 
       <ProfileForm
         key={selected?.id ?? "default"}
