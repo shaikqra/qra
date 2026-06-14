@@ -6,6 +6,7 @@ import { SanctionsRefresh } from "./sanctions-refresh";
 import { InviteButton } from "./invite-button";
 import { AutoChaToggle } from "./auto-cha-toggle";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
+import { listChaContacts } from "@/lib/cha-contacts";
 import type { ExporterProfileInput } from "./actions";
 
 // The sanctions-list refresh fetches and parses large government files; give
@@ -13,7 +14,7 @@ import type { ExporterProfileInput } from "./actions";
 export const maxDuration = 60;
 
 const PROFILE_COLUMNS =
-  "legal_name, address, factory_address, cin, gstin, iec, organic_code, bank_name, bank_branch, bank_swift, bank_account, bank_beneficiary, declaration_lut, declaration_rodtep, declaration_origin, default_currency, default_incoterm, cha_name, cha_email";
+  "legal_name, address, factory_address, cin, gstin, iec, organic_code, bank_name, bank_branch, bank_swift, bank_account, bank_beneficiary, declaration_lut, declaration_rodtep, declaration_origin, default_currency, default_incoterm";
 
 type CustomerRow = {
   id: string;
@@ -48,6 +49,9 @@ export default async function SettingsPage({
   const { data } = selected
     ? await profileQuery.eq("customer_id", selected.id).maybeSingle()
     : await profileQuery.eq("is_default", true).maybeSingle();
+
+  // CHAs are per-customer; the default profile has none.
+  const initialChas = selected ? await listChaContacts(supabase, selected.id) : [];
 
   const pill = (active: boolean) =>
     `rounded-full px-3 py-1.5 text-xs font-medium border ${
@@ -92,6 +96,7 @@ export default async function SettingsPage({
         initial={(data as Partial<ExporterProfileInput> | null) ?? null}
         customerId={selected?.id ?? null}
         initialCustomerName={selected?.display_name ?? ""}
+        initialChas={initialChas}
       />
 
       <AutoChaToggle initialEnabled={autoChaEnabled} />

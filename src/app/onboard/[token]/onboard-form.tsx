@@ -4,12 +4,13 @@ import { useState, useTransition } from "react";
 import {
   IDENTITY_FIELDS,
   BANK_FIELDS,
-  CHA_FIELDS,
   DECLARATION_FIELDS,
   ALL_PROFILE_FIELDS,
   type ExporterProfileInput,
+  type ChaContactInput,
   type ProfileField,
 } from "@/lib/profile-fields";
+import { ChaListEditor, emptyCha } from "@/components/cha-list-editor";
 import { submitOnboarding } from "./actions";
 
 export function OnboardForm({ token }: { token: string }) {
@@ -22,6 +23,8 @@ export function OnboardForm({ token }: { token: string }) {
     for (const f of ALL_PROFILE_FIELDS) v[f.key] = "";
     return v;
   });
+
+  const [chas, setChas] = useState<ChaContactInput[]>([emptyCha(true)]);
 
   function set(key: keyof ExporterProfileInput, val: string) {
     setValues((prev) => ({ ...prev, [key]: val }));
@@ -73,7 +76,7 @@ export function OnboardForm({ token }: { token: string }) {
           return;
         }
         startTransition(async () => {
-          const r = await submitOnboarding(token, values);
+          const r = await submitOnboarding(token, values, chas);
           if (r.ok) setDone(true);
           else setError(r.error);
         });
@@ -98,9 +101,13 @@ export function OnboardForm({ token }: { token: string }) {
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-          Your customs broker (CHA)
+          Your customs broker(s) — CHA
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{CHA_FIELDS.map(renderField)}</div>
+        <p className="text-xs text-zinc-500 mb-3 -mt-2">
+          Add more than one if you use a different broker at different ports. The default broker
+          receives your export documents automatically.
+        </p>
+        <ChaListEditor value={chas} onChange={setChas} accent="emerald" />
       </section>
 
       <section>

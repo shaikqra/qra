@@ -19,8 +19,16 @@ export type ExporterProfileInput = {
   declaration_origin: string;
   default_currency: string;
   default_incoterm: string;
-  cha_name: string;
-  cha_email: string;
+};
+
+// A customs broker (CHA). An exporter can have several — e.g. a different broker
+// per port — so these live in their own list, not as flat profile fields. One
+// row is marked default for automatic document sends.
+export type ChaContactInput = {
+  name: string;
+  email: string;
+  port: string;
+  is_default: boolean;
 };
 
 export type ProfileField = {
@@ -50,11 +58,6 @@ export const BANK_FIELDS: ProfileField[] = [
   { key: "bank_beneficiary", label: "Beneficiary name", placeholder: "Account holder name" },
 ];
 
-export const CHA_FIELDS: ProfileField[] = [
-  { key: "cha_name", label: "CHA name", placeholder: "Your customs broker / CHA firm" },
-  { key: "cha_email", label: "CHA email", placeholder: "broker@example.com" },
-];
-
 export const DECLARATION_FIELDS: ProfileField[] = [
   {
     key: "declaration_lut",
@@ -79,6 +82,5 @@ export const DECLARATION_FIELDS: ProfileField[] = [
 export const ALL_PROFILE_FIELDS: ProfileField[] = [
   ...IDENTITY_FIELDS,
   ...BANK_FIELDS,
-  ...CHA_FIELDS,
   ...DECLARATION_FIELDS,
 ];

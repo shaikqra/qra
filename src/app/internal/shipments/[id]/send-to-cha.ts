@@ -28,8 +28,7 @@ export async function sendDocsToCha(shipmentId: string): Promise<Result> {
     revalidatePath(`/internal/shipments/${shipmentId}`);
     return { ok: true, sent: result.sent };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("sendDocsToCha failed:", msg);
-    return { ok: false, error: `Send failed: ${msg}` };
+    console.error("sendDocsToCha failed:", e instanceof Error ? e.name : "unknown");
+    return { ok: false, error: "Could not send the documents — please try again." };
   }
 }

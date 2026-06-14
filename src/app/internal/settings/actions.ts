@@ -5,6 +5,8 @@ import { createSupabaseAuthClient, getOperatorSession } from "@/lib/supabase/aut
 import { refreshAllLists, type RefreshResult } from "@/lib/screening/local-lists";
 import { createInvite } from "@/lib/onboarding";
 import { setAppSetting } from "@/lib/app-settings";
+import { writeChaContacts } from "@/lib/cha-contacts";
+import type { ChaContactInput } from "@/lib/profile-fields";
 
 // Operator: turn automatic CHA emailing on/off (default off = pilot mode).
 export async function setAutoSendCha(
@@ -55,7 +57,8 @@ type Result = { ok: true } | { ok: false; error: string };
 export async function saveExporterProfile(
   input: ExporterProfileInput,
   customerId: string | null,
-  customerName?: string
+  customerName?: string,
+  chas?: ChaContactInput[]
 ): Promise<Result> {
   const session = await getOperatorSession();
   if (!session) return { ok: false, error: "Not authorized" };
@@ -91,6 +94,16 @@ export async function saveExporterProfile(
           .insert({ ...trimmed, customer_id: customerId, is_default: false });
 
     if (error) return { ok: false, error: "Could not save the profile" };
+
+    // CHAs are per-customer; replace the list for this exporter. The write is
+    // atomic, so on failure the existing broker list is left untouched.
+    const chaWrite = await writeChaContacts(supabase, customerId, chas ?? []);
+    if (!chaWrite.ok) {
+      return {
+        ok: false,
+        error: "Saved the profile, but couldn't update the brokers — your existing brokers are unchanged. Try saving again.",
+      };
+    }
 
     revalidatePath("/internal/settings");
     return { ok: true };

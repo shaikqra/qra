@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveExporterProfile, type ExporterProfileInput } from "./actions";
+import type { ChaContactInput } from "@/lib/profile-fields";
+import { ChaListEditor, emptyCha } from "@/components/cha-list-editor";
 
 type Field = { key: keyof ExporterProfileInput; label: string; placeholder?: string; area?: boolean };
 
@@ -24,11 +26,6 @@ const BANK: Field[] = [
   { key: "bank_swift", label: "SWIFT code", placeholder: "e.g. HDFCINBB" },
   { key: "bank_account", label: "Account / IBAN", placeholder: "Account number" },
   { key: "bank_beneficiary", label: "Beneficiary name", placeholder: "Account holder name" },
-];
-
-const CHA: Field[] = [
-  { key: "cha_name", label: "CHA name", placeholder: "Customs broker / CHA firm name" },
-  { key: "cha_email", label: "CHA email", placeholder: "broker@example.com" },
 ];
 
 const DECLARATIONS: Field[] = [
@@ -66,22 +63,28 @@ export function ProfileForm({
   initial,
   customerId,
   initialCustomerName,
+  initialChas,
 }: {
   initial: Partial<ExporterProfileInput> | null;
   customerId: string | null;
   initialCustomerName?: string;
+  initialChas?: ChaContactInput[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [customerName, setCustomerName] = useState(initialCustomerName ?? "");
 
-  const allFields = [...IDENTITY, ...BANK, ...CHA, ...DECLARATIONS];
+  const allFields = [...IDENTITY, ...BANK, ...DECLARATIONS];
   const [values, setValues] = useState<ExporterProfileInput>(() => {
     const v = {} as ExporterProfileInput;
     for (const f of allFields) v[f.key] = initial?.[f.key] ?? DEFAULTS[f.key] ?? "";
     return v;
   });
+
+  const [chas, setChas] = useState<ChaContactInput[]>(
+    initialChas && initialChas.length > 0 ? initialChas : [emptyCha(true)]
+  );
 
   function set(key: keyof ExporterProfileInput, val: string) {
     setValues((prev) => ({ ...prev, [key]: val }));
@@ -91,7 +94,7 @@ export function ProfileForm({
     e.preventDefault();
     setMessage(null);
     startTransition(async () => {
-      const result = await saveExporterProfile(values, customerId, customerName);
+      const result = await saveExporterProfile(values, customerId, customerName, chas);
       if (result.ok) {
         setMessage({ ok: true, text: "Saved." });
         router.refresh();
@@ -154,12 +157,18 @@ export function ProfileForm({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{BANK.map(renderField)}</div>
       </section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-          CHA (Customs Broker)
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{CHA.map(renderField)}</div>
-      </section>
+      {customerId && (
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
+            Customs broker(s) — CHA
+          </h2>
+          <p className="text-xs text-zinc-500 mb-3 -mt-2">
+            Add more than one if this exporter uses a different broker per port. The default broker
+            receives the documents automatically.
+          </p>
+          <ChaListEditor value={chas} onChange={setChas} accent="zinc" />
+        </section>
+      )}
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">

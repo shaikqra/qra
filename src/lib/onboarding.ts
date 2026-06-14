@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { ExporterProfileInput } from "@/lib/profile-fields";
+import type { ExporterProfileInput, ChaContactInput } from "@/lib/profile-fields";
 import { ALL_PROFILE_FIELDS } from "@/lib/profile-fields";
+import { writeChaContacts } from "@/lib/cha-contacts";
 
 // Profile-onboarding invites. The raw token lives only in the link we hand
 // out; the database stores its SHA-256 hash. Single use, 7-day expiry.
@@ -71,7 +72,8 @@ export async function validateInvite(
 // used_at claim makes a double-submit harmless.
 export async function submitInviteProfile(
   token: string,
-  input: ExporterProfileInput
+  input: ExporterProfileInput,
+  chas: ChaContactInput[]
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const invite = await validateInvite(token);
   if (!invite) return { ok: false, error: "This link is no longer valid. Ask for a new one." };
@@ -120,6 +122,12 @@ export async function submitInviteProfile(
       .eq("id", invite.inviteId);
     return { ok: false, error: "Could not save — please try again." };
   }
+
+  // Save the broker list. Best-effort: the profile is already saved and the
+  // invite burned, so a CHA-write hiccup shouldn't fail the whole onboarding —
+  // the operator can add brokers later. Never silent.
+  const chaWrite = await writeChaContacts(admin, invite.customerId, chas);
+  if (!chaWrite.ok) console.error("onboarding_cha_write_failed", { customer: true });
 
   // Use the legal name as the customer's display name if none is set yet.
   if (cleaned.legal_name) {

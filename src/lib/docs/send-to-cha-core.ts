@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { resolveChaEmail } from "@/lib/cha-contacts";
 
 export type ChaSendResult =
   | { ok: true; sent: number }
@@ -58,21 +59,9 @@ export async function sendDocsToChaCore(
   if (!shipment) return { ok: false, reason: "error", error: "Shipment not found" };
   const ref = shipment.reference_number as string;
 
-  // This exporter's own CHA, falling back to the default profile's.
-  let { data: profile } = await admin
-    .from("exporter_profiles")
-    .select("cha_email")
-    .eq("customer_id", shipment.customer_id)
-    .maybeSingle();
-  if (!profile) {
-    const { data: fallback } = await admin
-      .from("exporter_profiles")
-      .select("cha_email")
-      .eq("is_default", true)
-      .maybeSingle();
-    profile = fallback;
-  }
-  const chaEmail = (profile?.cha_email ?? "").trim();
+  // This exporter's default broker (or the first with an email). We never fall
+  // back to another exporter's broker — better to flag "no CHA" than misdeliver.
+  const chaEmail = await resolveChaEmail(admin, shipment.customer_id);
   if (!chaEmail) {
     return { ok: false, reason: "no_cha_email", error: "No CHA email is set for this exporter." };
   }
