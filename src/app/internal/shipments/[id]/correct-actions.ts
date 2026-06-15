@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getOperatorSession } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { proposeCorrection } from "@/lib/ai/apply-correction";
+import { reviewDocuments, type DocReviewFlag } from "@/lib/ai/review-documents";
 import { generateCommercialInvoiceCore, generatePackingListCore } from "@/lib/docs/generate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { validateExtracted } from "@/lib/docs/validate";
@@ -11,6 +12,25 @@ import { validateExtracted } from "@/lib/docs/validate";
 type Result =
   | { ok: true; field: string; oldValue: string; newValue: string; note?: string }
   | { ok: false; error: string };
+
+type CheckResult = { ok: true; flags: DocReviewFlag[] } | { ok: false; error: string };
+
+// Run the AI data-consistency check over the shipment's data (operator side, so
+// the flags sit next to the fix box — the §12 loop on one surface).
+export async function checkShipmentDocs(shipmentId: string): Promise<CheckResult> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  if (rateLimited(`check:${session.userId}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const admin = createSupabaseServerClient();
+  const { data: ship } = await admin
+    .from("shipments")
+    .select("extracted_data")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  if (!ship) return { ok: false, error: "Shipment not found." };
+  const flags = await reviewDocuments((ship.extracted_data ?? {}) as Record<string, string>);
+  return { ok: true, flags };
+}
 
 // A change to any of these must re-run denied-party screening — a corrected
 // party name can't reach the documents without being checked.
