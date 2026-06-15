@@ -5,6 +5,7 @@ import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ExtractionForm } from "./extraction-form";
 import { InvoicePanel } from "./invoice-panel";
+import { AiCorrect } from "./ai-correct";
 import { toActivities } from "@/lib/shipment-activity";
 
 type Shipment = {
@@ -260,6 +261,9 @@ export default async function ShipmentDetailPage({
           Documents
         </h2>
         <InvoicePanel shipmentId={ship.id} docs={generatedDocs} />
+        <div className="mt-3">
+          <AiCorrect shipmentId={ship.id} />
+        </div>
       </section>
 
       <section>
