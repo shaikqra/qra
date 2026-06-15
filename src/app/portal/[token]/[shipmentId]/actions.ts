@@ -6,38 +6,41 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalWriteRateLimited } from "@/lib/portal/auth";
 import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline";
 import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
+import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
 
 type Result = { ok: true } | { ok: false; error: string };
 
 // Authorize a portal write: the token must resolve to a customer, AND that
 // shipment must belong to them AND be at the expected gate. Returns the
-// customer id, or null (caller turns that into a friendly refusal). This is the
-// same trust the WhatsApp path gets from the verified phone number — here the
-// secret link is the credential.
+// customer id + reference, or null (caller turns that into a friendly refusal).
+// This is the same trust the WhatsApp path gets from the verified phone number —
+// here the secret link is the credential.
 async function authorize(
   token: string,
   shipmentId: string,
   expectedStatus: string
-): Promise<{ customerId: string } | null> {
+): Promise<{ customerId: string; referenceNumber: string } | null> {
   const customer = await resolveCustomerByPortalToken(token);
   if (!customer) return null;
   const admin = createSupabaseServerClient();
   const { data } = await admin
     .from("shipments")
-    .select("id")
+    .select("id, reference_number")
     .eq("id", shipmentId)
     .eq("customer_id", customer.id)
     .eq("status", expectedStatus)
     .maybeSingle();
-  return data ? { customerId: customer.id } : null;
+  return data
+    ? { customerId: customer.id, referenceNumber: (data.reference_number as string) ?? shipmentId }
+    : null;
 }
 
 // Confirm a drafted (emailed) order — resumes the pipeline from the stored draft.
 export async function portalConfirmOrder(token: string, shipmentId: string): Promise<Result> {
   if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
-  if (!(await authorize(token, shipmentId, "awaiting_order_confirm")))
-    return { ok: false, error: "This order can't be confirmed right now." };
+  const auth = await authorize(token, shipmentId, "awaiting_order_confirm");
+  if (!auth) return { ok: false, error: "This order can't be confirmed right now." };
 
   const admin = createSupabaseServerClient();
   // Atomic claim — a double-tap (or a simultaneous WhatsApp CONFIRM) can't double-run.
@@ -58,6 +61,12 @@ export async function portalConfirmOrder(token: string, shipmentId: string): Pro
   });
 
   after(async () => {
+    // Mirror the WhatsApp confirm reply, so both channels stay in sync.
+    await notifyCustomerWhatsApp(
+      admin,
+      auth.customerId,
+      `✅ Confirmed — I'm preparing your export documents for ${auth.referenceNumber} now. They'll arrive here shortly.`
+    );
     await runAutoPipeline({ shipmentId, extract: () => loadStoredExtraction(shipmentId) });
   });
 
@@ -67,8 +76,8 @@ export async function portalConfirmOrder(token: string, shipmentId: string): Pro
 
 export async function portalDeclineOrder(token: string, shipmentId: string): Promise<Result> {
   if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
-  if (!(await authorize(token, shipmentId, "awaiting_order_confirm")))
-    return { ok: false, error: "This order can't be declined right now." };
+  const auth = await authorize(token, shipmentId, "awaiting_order_confirm");
+  if (!auth) return { ok: false, error: "This order can't be declined right now." };
 
   const admin = createSupabaseServerClient();
   await admin
@@ -83,6 +92,13 @@ export async function portalDeclineOrder(token: string, shipmentId: string): Pro
     old_value: { status: "awaiting_order_confirm" },
     new_value: { event: "order_declined", declined_by: "customer", via: "portal" },
   });
+  after(async () => {
+    await notifyCustomerWhatsApp(
+      admin,
+      auth.customerId,
+      `No problem — I won't process that PO (${auth.referenceNumber}). Send me another anytime.`
+    );
+  });
   revalidatePath(`/portal/${token}/${shipmentId}`);
   return { ok: true };
 }
@@ -93,8 +109,8 @@ export async function portalDeclineOrder(token: string, shipmentId: string): Pro
 // channel is on the immutable trail.
 export async function portalApproveDocs(token: string, shipmentId: string): Promise<Result> {
   if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
-  if (!(await authorize(token, shipmentId, "awaiting_customer_approval")))
-    return { ok: false, error: "These documents can't be approved right now." };
+  const auth = await authorize(token, shipmentId, "awaiting_customer_approval");
+  if (!auth) return { ok: false, error: "These documents can't be approved right now." };
 
   const admin = createSupabaseServerClient();
   const approvalMessage = "Approved via Qra portal";
@@ -133,8 +149,14 @@ export async function portalApproveDocs(token: string, shipmentId: string): Prom
     },
   });
 
-  // Hand off to the CHA in the background (only if the operator enabled auto-send).
+  // Mirror the WhatsApp approve reply, then hand off to the CHA in the background
+  // (only if the operator enabled auto-send).
   after(async () => {
+    await notifyCustomerWhatsApp(
+      admin,
+      auth.customerId,
+      `✅ Thank you! Your documents for ${auth.referenceNumber} are approved and locked. We'll send them to your customs broker and proceed with your shipment.`
+    );
     try {
       if (!(await isAutoSendChaEnabled())) return;
       const sent = await sendDocsToChaCore(shipmentId, null, "customer_approved");
