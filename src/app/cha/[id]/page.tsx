@@ -4,7 +4,7 @@ import { ensureCha } from "@/lib/supabase/cha-auth";
 import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ChaActions } from "./cha-actions";
-import { DocReview } from "./doc-review";
+import { DocWorkspace } from "./doc-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -103,32 +103,10 @@ export default async function ChaShipmentPage({ params }: { params: Promise<{ id
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-          Document pack
+          Documents
         </h2>
-        {files.length === 0 ? (
-          <div className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500">
-            No documents on this shipment yet.
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {files.map((file) => (
-              <a
-                key={file.label}
-                href={file.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 hover:border-emerald-300 hover:bg-emerald-50"
-              >
-                <span className="text-lg">📄</span>
-                <span className="text-sm font-semibold text-emerald-800">{file.label}</span>
-                <span className="ml-auto text-xs font-semibold text-zinc-500">Open ↗</span>
-              </a>
-            ))}
-          </div>
-        )}
+        <DocWorkspace files={files} shipmentId={ship.id} />
       </section>
-
-      <DocReview shipmentId={ship.id} />
 
       {filed ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
