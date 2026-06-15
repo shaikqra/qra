@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ExtractionForm } from "./extraction-form";
 import { InvoicePanel } from "./invoice-panel";
 import { AiCorrect } from "./ai-correct";
+import { VerifyChain } from "./verify-chain";
 import { toActivities } from "@/lib/shipment-activity";
 
 type Shipment = {
@@ -270,6 +271,7 @@ export default async function ShipmentDetailPage({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
           Activity — what Qra did
         </h2>
+        <VerifyChain shipmentId={ship.id} />
         {activities.length === 0 ? (
           <div className="rounded-md border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
             Nothing yet.

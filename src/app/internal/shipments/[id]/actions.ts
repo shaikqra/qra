@@ -112,8 +112,11 @@ export async function saveShipmentExtraction(
     });
   }
 
-  if (audits.length > 0) {
-    await supabase.from("audit_operator_action").insert(audits);
+  // Insert one row per statement (not a single multi-row insert): the audit
+  // hash-chain trigger must fire in seq order, and Postgres doesn't guarantee
+  // firing order within a multi-row insert — which would fork the chain.
+  for (const a of audits) {
+    await supabase.from("audit_operator_action").insert(a);
   }
 
   // If the operator changed a party name, re-run denied-party screening on the

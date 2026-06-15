@@ -32,6 +32,31 @@ export async function checkShipmentDocs(shipmentId: string): Promise<CheckResult
   return { ok: true, flags };
 }
 
+type VerifyResult =
+  | { ok: true; intact: boolean; checked: number; brokenAt: number | null }
+  | { ok: false; error: string };
+
+// Prove the shipment's tamper-evident audit chain is intact (Build Bible §8).
+export async function verifyAuditChain(shipmentId: string): Promise<VerifyResult> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  const admin = createSupabaseServerClient();
+  const { data, error } = await admin.rpc("verify_audit_chain", { p_shipment: shipmentId });
+  if (error) {
+    console.error("verify_audit_chain_failed", { code: error.code });
+    return { ok: false, error: "Couldn't verify the trail." };
+  }
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { ok?: boolean; broken_at?: number | null; checked?: number }
+    | undefined;
+  return {
+    ok: true,
+    intact: !!row?.ok,
+    checked: Number(row?.checked ?? 0),
+    brokenAt: row?.broken_at != null ? Number(row.broken_at) : null,
+  };
+}
+
 // A change to any of these must re-run denied-party screening — a corrected
 // party name can't reach the documents without being checked.
 const PARTY_KEYS = ["buyer_name", "consignee_name", "notify_party_name"];
