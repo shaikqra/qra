@@ -677,6 +677,23 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
   );
 }
 
+// "Yes/confirm" is ambiguous when a customer has BOTH finished docs awaiting
+// approval AND a freshly-emailed order awaiting confirmation. Resolve it by
+// recency: the affirmative answers whichever gate they most recently entered.
+// Returns that shipment's status, or null if neither gate is pending.
+async function newestAffirmativeGate(customerId: string): Promise<string | null> {
+  const supabase = createSupabaseServerClient();
+  const { data } = await supabase
+    .from("shipments")
+    .select("status")
+    .eq("customer_id", customerId)
+    .in("status", ["awaiting_customer_approval", "awaiting_order_confirm"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.status as string) ?? null;
+}
+
 // A shipment created from a forwarded EMAIL PO parks at awaiting_order_confirm
 // until the exporter confirms it here on WhatsApp (blueprint order.confirm gate).
 // A clear CONFIRM resumes the pipeline; a clear NO cancels it. Returns a reply
@@ -930,16 +947,21 @@ export async function POST(req: NextRequest) {
   // was meant to fill another shipment's missing fields.
   try {
     if (isApprovalMessage(body)) {
-      // "yes/confirm": approve ready docs first, then a gap-fill value
-      // confirmation, and only then confirm a parked emailed order. Order-confirm
-      // stays LAST so it can't override the existing flows when a customer has
-      // several shipments live at once.
-      const approvalReply = await handleApprovalReply(customerId, body);
-      if (approvalReply) return twimlResponse(approvalReply);
+      // "yes/confirm" answers the customer's MOST RECENT gate — confirm the
+      // newest emailed order, or approve the newest ready docs. This stops a
+      // stale awaiting-approval shipment from swallowing a fresh order's CONFIRM.
+      // Gap-fill (value confirmation) stays the final fallback, as before.
+      const gate = await newestAffirmativeGate(customerId);
+      const affirmativeHandlers =
+        gate === "awaiting_order_confirm"
+          ? [handleOrderConfirmReply, handleApprovalReply]
+          : [handleApprovalReply, handleOrderConfirmReply];
+      for (const handler of affirmativeHandlers) {
+        const reply = await handler(customerId, body);
+        if (reply) return twimlResponse(reply);
+      }
       const gapFillReply = await handleGapFillReply(customerId, body);
       if (gapFillReply) return twimlResponse(gapFillReply);
-      const confirmReply = await handleOrderConfirmReply(customerId, body);
-      if (confirmReply) return twimlResponse(confirmReply);
     } else {
       // Other text is most likely a gap-fill answer, then a change request on a
       // doc awaiting approval. Order-confirm runs LAST so a bare "no" answering
