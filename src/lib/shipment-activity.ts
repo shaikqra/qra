@@ -1,5 +1,6 @@
 // Translate raw audit rows into a plain-English activity feed — the story of
-// every decision the agent (and the humans) made on a shipment.
+// every decision the agent (and the humans) made on a shipment. Shared by the
+// operator dashboard and the exporter portal (PII-safe — narration only).
 
 type AuditRow = {
   id: string;
@@ -21,6 +22,7 @@ export type Activity = {
 
 const STATUS_ACTIVITY: Record<string, { icon: string; text: string; tone: string }> = {
   data_extracting: { icon: "🤖", text: "Reading the PO and extracting the details", tone: "text-zinc-700" },
+  awaiting_order_confirm: { icon: "📋", text: "Read the order — waiting for it to be confirmed", tone: "text-amber-700" },
   awaiting_customer_info: { icon: "💬", text: "Asked the customer for missing details", tone: "text-yellow-700" },
   generating_documents: { icon: "📄", text: "Generating the documents", tone: "text-violet-700" },
   bucket_b_review: { icon: "👀", text: "Flagged for your review", tone: "text-indigo-700" },
@@ -33,6 +35,7 @@ const STATUS_ACTIVITY: Record<string, { icon: string; text: string; tone: string
   delivered: { icon: "📦", text: "Delivered", tone: "text-emerald-700" },
   completed: { icon: "🏁", text: "Shipment completed", tone: "text-zinc-700" },
   rejected: { icon: "❌", text: "Shipment rejected", tone: "text-red-700" },
+  order_declined: { icon: "❌", text: "Order declined", tone: "text-zinc-700" },
   po_received: { icon: "📥", text: "PO received", tone: "text-amber-700" },
 };
 
@@ -43,6 +46,10 @@ function noteActivity(
   switch (event) {
     case "order_source":
       return { icon: "📥", text: "Order received as a text message", tone: "text-amber-700" };
+    case "order_confirmed":
+      return { icon: "✅", text: "Order confirmed", tone: "text-green-700", actor: "Customer" };
+    case "order_declined":
+      return { icon: "❌", text: "Order declined", tone: "text-zinc-700", actor: "Customer" };
     case "sanctions_screened_clear":
       return { icon: "🛡️", text: "Screened the parties against US + UN + EU lists — clear", tone: "text-emerald-700" };
     case "sanctions_potential_match": {
@@ -62,8 +69,12 @@ function noteActivity(
     case "value_amount_computed_and_confirmed":
       return { icon: "🧮", text: "Calculated the invoice value and the customer confirmed it", tone: "text-zinc-700" };
     case "customer_notify_failed":
+    case "order_confirm_notify_failed":
       return { icon: "⚠️", text: "Couldn't reach the customer on WhatsApp", tone: "text-orange-700" };
     default:
+      // PRIVACY: only narrate KNOWN, exporter-safe events. Operator free-text
+      // notes (new_value.notes) must NEVER render — do NOT add a generic
+      // fallback here, or internal commentary would leak to the exporter portal.
       if (typeof nv.customer_message === "string") {
         return { icon: "💬", text: "Customer sent a message", tone: "text-zinc-700", actor: "Customer" };
       }
@@ -78,8 +89,7 @@ export function toActivities(rows: AuditRow[]): Activity[] {
     const base = { id: r.id, created_at: r.created_at };
 
     if (r.action_type === "status_change") {
-      const status =
-        (r.new_value as { status?: string } | null)?.status ?? "";
+      const status = (r.new_value as { status?: string } | null)?.status ?? "";
       const a = STATUS_ACTIVITY[status];
       if (a) out.push({ ...base, actor: "Qra", icon: a.icon, text: a.text, tone: a.tone });
       continue;
@@ -96,13 +106,18 @@ export function toActivities(rows: AuditRow[]): Activity[] {
 
     if (r.action_type === "approve") {
       const byCustomer = (r.new_value as { approved_by?: string } | null)?.approved_by === "customer";
-      out.push({
-        ...base,
-        actor: byCustomer ? "Customer" : "You",
-        icon: "✅",
-        text: byCustomer ? "Approved the documents" : "Approved and sent the documents",
-        tone: "text-green-700",
-      });
+      const ev = (r.new_value as { event?: string } | null)?.event;
+      if (ev === "order_confirmed") {
+        out.push({ ...base, actor: "Customer", icon: "✅", text: "Order confirmed", tone: "text-green-700" });
+      } else {
+        out.push({
+          ...base,
+          actor: byCustomer ? "Customer" : "You",
+          icon: "✅",
+          text: byCustomer ? "Approved the documents" : "Approved and sent the documents",
+          tone: "text-green-700",
+        });
+      }
       continue;
     }
 

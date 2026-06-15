@@ -48,11 +48,12 @@ export function portalStageIndex(status: string): number {
 export function portalActionHint(status: string): string | null {
   switch (status) {
     case "awaiting_order_confirm":
-      return "Waiting for you to confirm this order on WhatsApp.";
+      return "Waiting for you to confirm this order.";
     case "awaiting_customer_info":
+      // Gap-fill needs a free-text reply — that still happens on WhatsApp.
       return "We need a few more details — reply on WhatsApp.";
     case "awaiting_customer_approval":
-      return "Your documents are ready — review and reply APPROVE on WhatsApp.";
+      return "Your documents are ready to review and approve.";
     default:
       return null;
   }

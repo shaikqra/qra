@@ -5,7 +5,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalRateLimited } from "@/lib/portal/auth";
 import { portalActionHint, portalStageIndex } from "@/lib/portal/stages";
 import { isExporterVisibleDoc } from "@/lib/docs/doc-visibility";
+import { toActivities } from "@/lib/shipment-activity";
 import { Timeline } from "../timeline";
+import { GateActions } from "./gate-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,11 @@ type Shipment = {
 function f(d: Record<string, unknown> | null, k: string): string {
   const v = d?.[k];
   return typeof v === "string" ? v.trim() : "";
+}
+
+// The exporter is the "Customer"; operator/system actions read as "Qra" to them.
+function exporterActor(a: "Qra" | "You" | "Customer"): string {
+  return a === "Customer" ? "You" : "Qra";
 }
 
 function Detail({ k, v }: { k: string; v: string }) {
@@ -90,6 +97,14 @@ export default async function PortalShipment({
     }
   }
 
+  // Plain-English story of what Qra did — reuses the operator activity feed.
+  const { data: auditRows } = await admin
+    .from("audit_operator_action")
+    .select("id, operator_id, action_type, old_value, new_value, created_at")
+    .eq("shipment_id", shipmentId)
+    .order("created_at", { ascending: true });
+  const activities = toActivities((auditRows ?? []) as Parameters<typeof toActivities>[0]);
+
   const hint = portalActionHint(ship.status);
 
   return (
@@ -103,7 +118,9 @@ export default async function PortalShipment({
         </h1>
       </div>
 
-      {hint && (
+      <GateActions token={token} shipmentId={shipmentId} status={ship.status} />
+
+      {ship.status === "awaiting_customer_info" && hint && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           {hint}
         </div>
@@ -152,6 +169,25 @@ export default async function PortalShipment({
           </div>
         )}
       </section>
+
+      {activities.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Activity</h2>
+          <div className="rounded-xl border border-zinc-200 bg-white p-5 flex flex-col gap-3">
+            {activities.map((a) => (
+              <div key={a.id} className="flex items-start gap-3">
+                <span className="text-base leading-none mt-0.5">{a.icon}</span>
+                <div>
+                  <div className={`text-sm ${a.tone}`}>{a.text}</div>
+                  <div className="text-[11px] text-zinc-400 mt-0.5">
+                    {exporterActor(a.actor)} · {new Date(a.created_at).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

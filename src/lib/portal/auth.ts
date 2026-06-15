@@ -75,3 +75,23 @@ export function portalRateLimited(ip: string): boolean {
   buckets.set(ip, hits);
   return false;
 }
+
+// Tighter, SEPARATE throttle for write actions (confirm/approve). Capped harder
+// because a confirm triggers paid pipeline work, and on its own bucket so a
+// write flood can't also lock the exporter out of just viewing pages. The atomic
+// DB status claims are the real double-run guard; this is cost hygiene.
+const WRITE_RATE_MAX = 8;
+const writeBuckets = new Map<string, number[]>();
+
+export function portalWriteRateLimited(key: string): boolean {
+  const now = Date.now();
+  const cutoff = now - RATE_WINDOW_MS;
+  const hits = (writeBuckets.get(key) ?? []).filter((t) => t > cutoff);
+  if (hits.length >= WRITE_RATE_MAX) {
+    writeBuckets.set(key, hits);
+    return true;
+  }
+  hits.push(now);
+  writeBuckets.set(key, hits);
+  return false;
+}

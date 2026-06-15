@@ -5,7 +5,7 @@ import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ExtractionForm } from "./extraction-form";
 import { InvoicePanel } from "./invoice-panel";
-import { toActivities } from "./activity";
+import { toActivities } from "@/lib/shipment-activity";
 
 type Shipment = {
   id: string;
