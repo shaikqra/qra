@@ -7,6 +7,7 @@ import { ExtractionForm } from "./extraction-form";
 import { InvoicePanel } from "./invoice-panel";
 import { AiCorrect } from "./ai-correct";
 import { VerifyChain } from "./verify-chain";
+import { CloseShipment } from "./close-shipment";
 import { toActivities } from "@/lib/shipment-activity";
 
 type Shipment = {
@@ -162,6 +163,7 @@ export default async function ShipmentDetailPage({
             {new Date(ship.created_at).toLocaleString()}
           </p>
         </div>
+        <CloseShipment shipmentId={ship.id} status={ship.status} />
       </div>
 
       {qraElapsedMs !== null && (
@@ -263,7 +265,7 @@ export default async function ShipmentDetailPage({
         </h2>
         <InvoicePanel shipmentId={ship.id} docs={generatedDocs} />
         <div className="mt-3">
-          <AiCorrect shipmentId={ship.id} />
+          <AiCorrect shipmentId={ship.id} data={(ship.extracted_data ?? {}) as Record<string, string>} />
         </div>
       </section>
 

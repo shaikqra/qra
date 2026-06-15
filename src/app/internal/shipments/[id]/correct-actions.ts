@@ -5,6 +5,7 @@ import { getOperatorSession } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { proposeCorrection } from "@/lib/ai/apply-correction";
 import { reviewDocuments, type DocReviewFlag } from "@/lib/ai/review-documents";
+import { classifyHsCode, type HsResult } from "@/lib/ai/classify-hs";
 import { generateCommercialInvoiceCore, generatePackingListCore } from "@/lib/docs/generate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { validateExtracted } from "@/lib/docs/validate";
@@ -55,6 +56,69 @@ export async function verifyAuditChain(shipmentId: string): Promise<VerifyResult
     checked: Number(row?.checked ?? 0),
     brokenAt: row?.broken_at != null ? Number(row.broken_at) : null,
   };
+}
+
+type HsCheckResult = { ok: true; result: HsResult } | { ok: false; error: string };
+
+// Advisory HS-code check (Compliance agent). Reads the goods + current HS code
+// and asks the AI whether they match. Read-only — surfaces a suggestion the
+// operator can apply through the normal guarded correction.
+export async function checkHsCode(shipmentId: string): Promise<HsCheckResult> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  if (rateLimited(`hs:${session.userId}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const admin = createSupabaseServerClient();
+  const { data: ship } = await admin
+    .from("shipments")
+    .select("extracted_data")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  if (!ship) return { ok: false, error: "Shipment not found." };
+  const d = (ship.extracted_data ?? {}) as Record<string, string>;
+  const result = await classifyHsCode(d.product_description ?? "", d.hs_code ?? "");
+  if (!result) return { ok: false, error: "Couldn't check the HS code — add a product description first." };
+  return { ok: true, result };
+}
+
+// G8 (operator side) — close a filed shipment from the dashboard.
+const OPERATOR_CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered"];
+
+export async function operatorCloseShipment(shipmentId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  const admin = createSupabaseServerClient();
+  const { data: ship } = await admin
+    .from("shipments")
+    .select("status")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  const prevStatus = ship?.status as string | undefined;
+  if (!prevStatus || !OPERATOR_CLOSEABLE.includes(prevStatus)) {
+    return { ok: false, error: "This shipment can only be closed once it's filed with the CHA." };
+  }
+
+  // Atomic claim guarded on the exact prior status (race-safe).
+  const { data: claimed } = await admin
+    .from("shipments")
+    .update({ status: "completed" })
+    .eq("id", shipmentId)
+    .eq("status", prevStatus)
+    .select("id");
+  if (!claimed || claimed.length === 0) {
+    return { ok: false, error: "This shipment can't be closed — it may have moved on." };
+  }
+
+  const { error: auditErr } = await admin.from("audit_operator_action").insert({
+    operator_id: session.userId,
+    shipment_id: shipmentId,
+    action_type: "status_change",
+    old_value: { status: prevStatus },
+    new_value: { status: "completed", closed_by: "operator" },
+  });
+  if (auditErr) console.error("operator_close_audit_failed", { code: auditErr.code });
+
+  revalidatePath(`/internal/shipments/${shipmentId}`);
+  return { ok: true };
 }
 
 // A change to any of these must re-run denied-party screening — a corrected

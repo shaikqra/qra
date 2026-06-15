@@ -2,13 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { applyAiCorrection, checkShipmentDocs } from "./correct-actions";
+import { applyAiCorrection, checkShipmentDocs, checkHsCode } from "./correct-actions";
 import type { DocReviewFlag } from "@/lib/ai/review-documents";
+import type { HsResult } from "@/lib/ai/classify-hs";
+import { DocFacsimile, flaggedKeys } from "./doc-facsimile";
 
 // §12 review-and-correct loop on the operator's pre-approval surface: run the AI
-// check, then fix a flagged issue in one tap or type your own instruction — Qra
-// redrafts the field and regenerates the documents (re-screening parties /
-// re-validating first; never on an already-approved pack).
+// check + HS check, see the document with flagged fields highlighted, fix a flag
+// in one tap or type your own instruction. Qra redrafts the field and regenerates
+// the documents (re-screening / re-validating first; never on an approved pack).
 
 const SEV: Record<string, { box: string; badge: string }> = {
   high: { box: "border-red-200 bg-red-50", badge: "bg-red-100 text-red-700" },
@@ -18,12 +20,14 @@ const SEV: Record<string, { box: string; badge: string }> = {
 
 type Done = { field: string; oldValue: string; newValue: string; note?: string };
 
-export function AiCorrect({ shipmentId }: { shipmentId: string }) {
+export function AiCorrect({ shipmentId, data }: { shipmentId: string; data: Record<string, string> }) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [pending, startTransition] = useTransition();
   const [checking, startCheck] = useTransition();
+  const [hsPending, startHs] = useTransition();
   const [flags, setFlags] = useState<DocReviewFlag[] | null>(null);
+  const [hs, setHs] = useState<HsResult | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +36,15 @@ export function AiCorrect({ shipmentId }: { shipmentId: string }) {
     startCheck(async () => {
       const r = await checkShipmentDocs(shipmentId);
       if (r.ok) setFlags(r.flags);
+      else setError(r.error);
+    });
+  }
+
+  function hsCheck() {
+    setError(null);
+    startHs(async () => {
+      const r = await checkHsCode(shipmentId);
+      if (r.ok) setHs(r.result);
       else setError(r.error);
     });
   }
@@ -57,22 +70,56 @@ export function AiCorrect({ shipmentId }: { shipmentId: string }) {
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-4 flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-zinc-800">Review &amp; fix documents with Qra</div>
           <p className="text-xs text-zinc-500">
-            Run the AI check, then apply a flagged fix in one tap — or type your own. Qra redrafts the
-            field and regenerates the documents. Only before the customer approves.
+            Check the data, see the flagged fields on the document, apply a fix in one tap or type
+            your own. Qra redrafts the field + regenerates. Only before the customer approves.
           </p>
         </div>
-        <button
-          onClick={check}
-          disabled={checking}
-          className="shrink-0 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-        >
-          {checking ? "Checking…" : flags ? "Re-check" : "Run check"}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            onClick={check}
+            disabled={checking}
+            className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {checking ? "Checking…" : flags ? "Re-check" : "Run check"}
+          </button>
+          <button
+            onClick={hsCheck}
+            disabled={hsPending}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            {hsPending ? "Checking…" : "Check HS code"}
+          </button>
+        </div>
       </div>
+
+      {hs && (
+        <div
+          className={`rounded-md border px-3 py-2 text-sm ${
+            hs.matches
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-amber-200 bg-amber-50 text-amber-800"
+          }`}
+        >
+          {hs.matches ? (
+            <>✓ HS code {hs.current || "(none)"} looks right for the goods.</>
+          ) : (
+            <>
+              ⚠ HS code may be off — Qra suggests <b>{hs.suggested}</b>. {hs.note}
+              <button
+                onClick={() => apply(`set hs_code to ${hs.suggested}`)}
+                disabled={pending}
+                className="ml-2 rounded bg-zinc-900 px-2 py-0.5 text-xs font-semibold text-white hover:bg-zinc-700 disabled:opacity-50"
+              >
+                Apply
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {flags && flags.length === 0 && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
@@ -106,6 +153,8 @@ export function AiCorrect({ shipmentId }: { shipmentId: string }) {
           })}
         </ul>
       )}
+
+      {flags && <DocFacsimile data={data} flagged={flaggedKeys(flags)} />}
 
       <div className="flex gap-2">
         <input
