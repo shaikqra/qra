@@ -533,15 +533,20 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
 async function handleGapFillReply(customerId: string, body: string): Promise<string | null> {
   const supabase = createSupabaseServerClient();
 
-  const { data: shipment } = await supabase
+  // A customer can have several shipments parked here at once (incl. stale ones
+  // left after the required-field rules changed). Pick the NEWEST one that still
+  // has a missing required field — don't let an empty one shadow the real one.
+  const { data: candidates } = await supabase
     .from("shipments")
     .select("id, reference_number, status, extracted_data")
     .eq("customer_id", customerId)
     .eq("status", "awaiting_customer_info")
     .order("reference_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
 
+  const shipment = (candidates ?? []).find(
+    (s) => missingRequiredFields((s.extracted_data ?? {}) as Record<string, string>).length > 0
+  );
   if (!shipment) return null;
 
   const shipmentId = shipment.id as string;
@@ -550,7 +555,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
 
   const missing = missingRequiredFields(current);
   if (missing.length === 0) {
-    // Operator already completed the fields from the dashboard; nothing to ask.
+    // Belt-and-braces (find already filtered) — nothing left to ask.
     return null;
   }
 
