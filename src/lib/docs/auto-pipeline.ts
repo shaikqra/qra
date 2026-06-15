@@ -198,7 +198,33 @@ export async function runAutoPipeline(args: {
     // the agent may not act on data it can't vouch for.
     const issues = validateExtracted(merged);
     const shaky = lowConfidenceFields(merged, confidence);
-    if (issues.length > 0 || shaky.length > 0) {
+
+    // Packing details are optional and vary by PO format, so a shaky packing
+    // value must NOT halt the shipment (the same rule the gap-fill and the doc
+    // generators already follow). Drop any low-confidence packing value — we
+    // won't put a weight we don't trust on a customs document — and let the
+    // optional packing-ask below invite the exporter to add it. Only shaky
+    // required / critical fields (parties, money, customs) still pause for the
+    // operator review desk.
+    const optionalPackingKeys = new Set(Object.keys(OPTIONAL_PACKING_LABELS));
+    const shakyPacking = shaky.filter((f) => optionalPackingKeys.has(f));
+    const shakyBlocking = shaky.filter((f) => !optionalPackingKeys.has(f));
+    if (shakyPacking.length > 0) {
+      for (const f of shakyPacking) delete merged[f];
+      await admin
+        .from("shipments")
+        .update({ extracted_data: merged })
+        .eq("id", args.shipmentId);
+      await admin.from("audit_operator_action").insert({
+        operator_id: null,
+        shipment_id: args.shipmentId,
+        action_type: "note",
+        old_value: null,
+        new_value: { event: "low_confidence_packing_dropped", fields: shakyPacking },
+      });
+    }
+
+    if (issues.length > 0 || shakyBlocking.length > 0) {
       await setStatus("bucket_b_review");
       await admin.from("audit_operator_action").insert({
         operator_id: null,
@@ -208,13 +234,13 @@ export async function runAutoPipeline(args: {
         new_value: {
           event: "trust_gate_flagged",
           validation_issues: issues,
-          low_confidence_fields: shaky,
+          low_confidence_fields: shakyBlocking,
         },
       });
       console.log("auto_pipeline_trust_gate", {
         shipmentId: args.shipmentId,
         issueCount: issues.length,
-        lowConfidenceCount: shaky.length,
+        lowConfidenceCount: shakyBlocking.length,
       });
       return;
     }
