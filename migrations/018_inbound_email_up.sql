@@ -1,5 +1,5 @@
 -- Migration 018 UP: per-exporter inbound email address. Each exporter gets a
--- unique secret token; their PO-forwarding address is po-<token>@in.theqra.com.
+-- unique secret token; their PO-forwarding address is po-<token>@theqra.com.
 -- A forwarded PO email is matched back to the exporter by this token (the secret
 -- address is the auth — like the WhatsApp number identifies the sender today).
 alter table public.customers add column if not exists inbound_token text;

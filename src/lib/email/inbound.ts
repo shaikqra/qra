@@ -2,11 +2,11 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 // Inbound email intake: an exporter auto-forwards a buyer's PO to their secret
-// address po-<token>@in.theqra.com; Resend posts an "email.received" webhook;
+// address po-<token>@theqra.com; Resend posts an "email.received" webhook;
 // we match the exporter by the token, pull the PDF, and run the same pipeline as
 // the WhatsApp path. The secret address is the auth (no inbox access, no OAuth).
 
-const INBOUND_DOMAIN = "in.theqra.com";
+const INBOUND_DOMAIN = "theqra.com";
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 type InboundMediaType = "application/pdf" | "image/jpeg" | "image/png";
@@ -54,7 +54,7 @@ export async function resolveCustomerByInbound(toList: string[]): Promise<string
   // with it if the token length ever changes, or matching silently breaks.
   const tokens: string[] = [];
   for (const addr of toList) {
-    const m = (addr ?? "").toLowerCase().match(/po-([a-f0-9]{16,64})@in\.theqra\.com/);
+    const m = (addr ?? "").toLowerCase().match(/po-([a-f0-9]{16,64})@theqra\.com/);
     if (m) tokens.push(m[1]);
   }
   if (tokens.length === 0) return null;
