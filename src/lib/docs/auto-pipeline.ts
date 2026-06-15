@@ -1,5 +1,5 @@
-import twilio from "twilio";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import type { PoFields, PoConfidence } from "@/lib/ai/extract-po";
 import {
   generateCommercialInvoiceCore,
@@ -10,37 +10,6 @@ import { missingFieldLines } from "@/lib/docs/gap-message";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
-
-// Best-effort WhatsApp text to the shipment's customer. Returns whether the
-// message was sent so callers can surface a failed notification.
-async function sendWhatsAppText(
-  admin: ReturnType<typeof createSupabaseServerClient>,
-  customerId: string,
-  text: string
-): Promise<boolean> {
-  try {
-    const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
-    const token = process.env.TWILIO_AUTH_TOKEN?.trim();
-    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER?.trim();
-    if (!sid || !token || !fromNumber) return false;
-
-    const { data: customer } = await admin
-      .from("customers")
-      .select("whatsapp_number")
-      .eq("id", customerId)
-      .maybeSingle();
-    const to = (customer?.whatsapp_number ?? "").trim();
-    if (!to) return false;
-
-    await twilio(sid, token).messages.create({ from: fromNumber, to, body: text });
-    return true;
-  } catch (err) {
-    console.error("gap_fill_notify_failed", {
-      name: err instanceof Error ? err.name : "unknown",
-    });
-    return false;
-  }
-}
 
 // The automation: runs in the background after a PO lands on WhatsApp.
 //   extract fields -> save -> generate documents -> set status for review.
@@ -116,7 +85,7 @@ export async function runAutoPipeline(args: {
         .maybeSingle();
       await setStatus("awaiting_customer_info");
       if (shipRow) {
-        const notified = await sendWhatsAppText(
+        const notified = await notifyCustomerWhatsApp(
           admin,
           shipRow.customer_id as string,
           `I've read your PO (ref ${shipRow.reference_number}). To finish your documents I still need:\n` +
