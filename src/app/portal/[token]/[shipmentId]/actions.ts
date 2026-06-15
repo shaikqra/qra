@@ -171,3 +171,39 @@ export async function portalApproveDocs(token: string, shipmentId: string): Prom
   revalidatePath(`/portal/${token}/${shipmentId}`);
   return { ok: true };
 }
+
+// G8 — close the shipment. The exporter closes once it's filed and complete; the
+// shipment reaches its terminal state. (The full G8 in the Bible also reconciles
+// proceeds + eBRC — that's Treasury, a P2 agent — so this is the close itself.)
+const CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered"];
+
+export async function portalCloseShipment(token: string, shipmentId: string): Promise<Result> {
+  if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const customer = await resolveCustomerByPortalToken(token);
+  if (!customer) return { ok: false, error: "This shipment can't be closed right now." };
+
+  const admin = createSupabaseServerClient();
+  // Auth + atomic claim in one: only this customer's shipment, only from a
+  // closeable state, moved to 'completed' exactly once.
+  const { data: claimed } = await admin
+    .from("shipments")
+    .update({ status: "completed" })
+    .eq("id", shipmentId)
+    .eq("customer_id", customer.id)
+    .in("status", CLOSEABLE)
+    .select("id");
+  if (!claimed || claimed.length === 0) {
+    return { ok: false, error: "This shipment can't be closed right now." };
+  }
+
+  await admin.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "status_change",
+    old_value: null,
+    new_value: { status: "completed", closed_by: "customer", via: "portal" },
+  });
+
+  revalidatePath(`/portal/${token}/${shipmentId}`);
+  return { ok: true };
+}
