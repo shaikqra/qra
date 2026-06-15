@@ -4,7 +4,7 @@ import twilio from "twilio";
 import { createHash, randomBytes } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hashPhone } from "@/lib/hash";
-import { runAutoPipeline } from "@/lib/docs/auto-pipeline";
+import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline";
 import {
   extractPoFields,
   extractPoFieldsFromText,
@@ -354,6 +354,22 @@ function isApprovalMessage(body: string): boolean {
   return APPROVAL_PHRASES.has(norm);
 }
 
+// Clear "no, don't process this" replies — used to decline an emailed PO at the
+// order-confirm gate. Whole-message match only, so it can't catch a stray "no".
+const DECLINE_PHRASES = new Set([
+  "no", "nope", "nah", "cancel", "cancelled", "ignore", "discard",
+  "reject", "rejected", "stop", "skip", "not this", "not mine", "delete",
+]);
+
+function isDeclineMessage(body: string): boolean {
+  const norm = body
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return DECLINE_PHRASES.has(norm);
+}
+
 // If this customer has a shipment waiting on their approval, their text is an
 // approve/change decision — not a general chat message. Returns a reply string
 // when it handled the message, or null if nothing is pending (so the caller
@@ -661,6 +677,82 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
   );
 }
 
+// A shipment created from a forwarded EMAIL PO parks at awaiting_order_confirm
+// until the exporter confirms it here on WhatsApp (blueprint order.confirm gate).
+// A clear CONFIRM resumes the pipeline; a clear NO cancels it. Returns a reply
+// when it clearly handled the message, or null to fall through (ambiguous
+// replies are left alone so they can't swallow another shipment's answer).
+// Never logs the message body (may contain PII).
+async function handleOrderConfirmReply(customerId: string, body: string): Promise<string | null> {
+  const supabase = createSupabaseServerClient();
+
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, reference_number")
+    .eq("customer_id", customerId)
+    .eq("status", "awaiting_order_confirm")
+    .order("reference_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!shipment) return null;
+
+  const shipmentId = shipment.id as string;
+  const ref = shipment.reference_number as string;
+
+  if (isApprovalMessage(body)) {
+    // Atomic claim so a duplicate/concurrent reply can't double-run the pipeline.
+    const { data: claimed } = await supabase
+      .from("shipments")
+      .update({ status: "data_extracting" })
+      .eq("id", shipmentId)
+      .eq("status", "awaiting_order_confirm")
+      .select("id");
+    if (!claimed || claimed.length === 0) {
+      return `Thanks — I'm already preparing your documents for ${ref}.`;
+    }
+
+    await supabase.from("audit_operator_action").insert({
+      operator_id: null, // customer confirmed, not an operator
+      shipment_id: shipmentId,
+      action_type: "approve",
+      old_value: { status: "awaiting_order_confirm" },
+      new_value: { event: "order_confirmed", confirmed_by: "customer" },
+    });
+
+    // Resume the pipeline from the stored draft — no second paid extraction.
+    after(async () => {
+      await runAutoPipeline({
+        shipmentId,
+        extract: () => loadStoredExtraction(shipmentId),
+      });
+    });
+
+    console.log("order_confirmed", { shipmentId });
+    return `✅ Great — preparing your export documents for ${ref} now. They'll arrive here in about a minute; reply APPROVE once you've checked them.`;
+  }
+
+  if (isDeclineMessage(body)) {
+    await supabase
+      .from("shipments")
+      .update({ status: "order_declined" })
+      .eq("id", shipmentId)
+      .eq("status", "awaiting_order_confirm");
+    await supabase.from("audit_operator_action").insert({
+      operator_id: null,
+      shipment_id: shipmentId,
+      action_type: "note",
+      old_value: { status: "awaiting_order_confirm" },
+      new_value: { event: "order_declined", declined_by: "customer" },
+    });
+    console.log("order_declined", { shipmentId });
+    return `No problem — I won't process that PO (${ref}). Send me another anytime.`;
+  }
+
+  // Ambiguous — leave it parked and fall through (don't swallow other replies).
+  return null;
+}
+
 // Create a shipment from an order sent as plain text (no PDF). The order text
 // is stored as the shipment's customer note and is the source for extraction.
 async function createTextOrderShipment(
@@ -838,15 +930,26 @@ export async function POST(req: NextRequest) {
   // was meant to fill another shipment's missing fields.
   try {
     if (isApprovalMessage(body)) {
+      // "yes/confirm": approve ready docs first, then a gap-fill value
+      // confirmation, and only then confirm a parked emailed order. Order-confirm
+      // stays LAST so it can't override the existing flows when a customer has
+      // several shipments live at once.
       const approvalReply = await handleApprovalReply(customerId, body);
       if (approvalReply) return twimlResponse(approvalReply);
       const gapFillReply = await handleGapFillReply(customerId, body);
       if (gapFillReply) return twimlResponse(gapFillReply);
+      const confirmReply = await handleOrderConfirmReply(customerId, body);
+      if (confirmReply) return twimlResponse(confirmReply);
     } else {
+      // Other text is most likely a gap-fill answer, then a change request on a
+      // doc awaiting approval. Order-confirm runs LAST so a bare "no" answering
+      // one shipment's question can't accidentally cancel a different parked order.
       const gapFillReply = await handleGapFillReply(customerId, body);
       if (gapFillReply) return twimlResponse(gapFillReply);
       const approvalReply = await handleApprovalReply(customerId, body);
       if (approvalReply) return twimlResponse(approvalReply);
+      const confirmReply = await handleOrderConfirmReply(customerId, body);
+      if (confirmReply) return twimlResponse(confirmReply);
     }
   } catch (err) {
     console.error("pending_reply_failed", {

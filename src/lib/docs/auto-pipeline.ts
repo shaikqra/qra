@@ -11,10 +11,52 @@ import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 
+// A one-line, human-readable summary of the drafted order for the confirm ask.
+// Only safe-to-show business fields; empty string if nothing extracted.
+function orderSummary(d: Record<string, string>): string {
+  const parts: string[] = [];
+  if (d.buyer_name) parts.push(`from ${d.buyer_name}`);
+  if (d.product_description) parts.push(d.product_description);
+  const qty = [d.quantity, d.quantity_unit].filter(Boolean).join(" ");
+  if (qty) parts.push(qty);
+  const val = [d.value_currency, d.value_amount].filter(Boolean).join(" ");
+  if (val) parts.push(val);
+  if (d.incoterm) parts.push(d.incoterm);
+  return parts.join(", ");
+}
+
+// Rebuild the {fields, confidence} an extract closure would return, from the
+// data already stored on the shipment — used to RESUME the pipeline after the
+// exporter confirms an emailed order (no second paid extraction).
+export async function loadStoredExtraction(
+  shipmentId: string
+): Promise<{ fields: PoFields; confidence: PoConfidence }> {
+  const admin = createSupabaseServerClient();
+  const { data } = await admin
+    .from("shipments")
+    .select("extracted_data")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  const stored = (data?.extracted_data ?? {}) as Record<string, string>;
+  let confidence = {} as PoConfidence;
+  try {
+    confidence = JSON.parse(stored["_confidence"] ?? "{}");
+  } catch {
+    confidence = {} as PoConfidence;
+  }
+  const fields: Record<string, string> = {};
+  for (const [k, v] of Object.entries(stored)) {
+    if (k !== "_confidence") fields[k] = v;
+  }
+  return { fields: fields as PoFields, confidence };
+}
+
 // The automation: runs in the background after a PO lands on WhatsApp.
 //   extract fields -> save -> generate documents -> set status for review.
 // Statuses: po_received -> data_extracting -> generating_documents ->
 //   bucket_b_review (docs ready) or awaiting_customer_info (fields missing).
+// confirmFirst (email intake): after extraction, park at awaiting_order_confirm
+//   and ask the exporter to confirm before generating anything — see migration 019.
 // Every system action is written to audit_operator_action with
 // operator_id = NULL (meaning: the system acted).
 // Never throws — failures log (no PII) and the shipment returns to
@@ -23,6 +65,7 @@ import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/scr
 export async function runAutoPipeline(args: {
   shipmentId: string;
   extract: () => Promise<{ fields: PoFields; confidence: PoConfidence }>;
+  confirmFirst?: boolean;
 }): Promise<void> {
   const admin = createSupabaseServerClient();
 
@@ -72,6 +115,45 @@ export async function runAutoPipeline(args: {
       .update({ extracted_data: merged })
       .eq("id", args.shipmentId);
     await audit("extract", current, merged);
+
+    // Order-confirm gate (email intake only): the PO was passively forwarded,
+    // so the exporter must confirm the drafted order before we generate
+    // anything (blueprint intake-agent human_gate = order.confirm). Park and
+    // ask on WhatsApp; the reply is handled by the webhook's order-confirm
+    // branch, which resumes this pipeline (confirmFirst off) on CONFIRM.
+    if (args.confirmFirst) {
+      const { data: shipRow } = await admin
+        .from("shipments")
+        .select("customer_id, reference_number")
+        .eq("id", args.shipmentId)
+        .maybeSingle();
+      await setStatus("awaiting_order_confirm");
+      let notified = false;
+      if (shipRow) {
+        const summary = orderSummary(merged);
+        notified = await notifyCustomerWhatsApp(
+          admin,
+          shipRow.customer_id as string,
+          `📋 I read a new purchase order (ref ${shipRow.reference_number})` +
+            (summary ? `:\n${summary}` : ".") +
+            `\n\nReply CONFIRM to generate your export documents, or NO if this isn't one to process.`
+        );
+      }
+      if (!notified) {
+        // Parked but the exporter was never reached (no WhatsApp number, a send
+        // failure, or a missing row). Surface it so the order isn't invisible
+        // work that can never be confirmed — the operator must follow up.
+        await admin.from("audit_operator_action").insert({
+          operator_id: null,
+          shipment_id: args.shipmentId,
+          action_type: "note",
+          old_value: null,
+          new_value: { event: "order_confirm_notify_failed" },
+        });
+      }
+      console.log("auto_pipeline_awaiting_confirm", { shipmentId: args.shipmentId, notified });
+      return;
+    }
 
     // Gap-fill: if required fields are missing, ask the customer on WhatsApp
     // instead of generating incomplete documents. Their reply is handled by

@@ -95,7 +95,13 @@ export async function POST(req: NextRequest) {
   const mediaType = file.mediaType;
   after(async () => {
     try {
-      await runAutoPipeline({ shipmentId, extract: () => extractPoFields(base64, mediaType) });
+      // confirmFirst: an emailed PO is drafted, then parks for the exporter to
+      // confirm on WhatsApp before any documents are generated.
+      await runAutoPipeline({
+        shipmentId,
+        extract: () => extractPoFields(base64, mediaType),
+        confirmFirst: true,
+      });
     } catch (e) {
       console.error("inbound_pipeline_threw", {
         shipmentId,
