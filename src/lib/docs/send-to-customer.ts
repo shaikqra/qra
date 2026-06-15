@@ -1,5 +1,6 @@
 import twilio from "twilio";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { NOT_FOR_CUSTOMER } from "@/lib/docs/doc-visibility";
 
 export type SendDocsResult = { ok: true; sent: number } | { ok: false; error: string };
 
@@ -9,9 +10,6 @@ const DOC_LABELS: Record<string, string> = {
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
 };
-
-// Broker-facing documents that should not go to the customer on WhatsApp.
-const NOT_FOR_CUSTOMER = new Set(["shipping_bill_pack"]);
 
 // Send the latest generated document of each type to the shipment's customer
 // on WhatsApp and move the shipment to awaiting_customer_approval. Called by

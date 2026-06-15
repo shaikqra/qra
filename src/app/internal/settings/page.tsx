@@ -8,6 +8,7 @@ import { AutoChaToggle } from "./auto-cha-toggle";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
 import { listChaContacts } from "@/lib/cha-contacts";
 import { getOrCreateInboundToken, inboundAddressFor } from "@/lib/email/inbound";
+import { getOrCreatePortalToken, portalUrlFor } from "@/lib/portal/auth";
 import type { ExporterProfileInput } from "./actions";
 
 // The sanctions-list refresh fetches and parses large government files; give
@@ -58,6 +59,10 @@ export default async function SettingsPage({
   const inboundToken = selected ? await getOrCreateInboundToken(selected.id) : null;
   const inboundAddress = inboundToken ? inboundAddressFor(inboundToken) : null;
 
+  // The exporter's private read-only portal link (generated once, on first view).
+  const portalToken = selected ? await getOrCreatePortalToken(selected.id) : null;
+  const portalUrl = portalToken ? portalUrlFor(portalToken) : null;
+
   const pill = (active: boolean) =>
     `rounded-full px-3 py-1.5 text-xs font-medium border ${
       active
@@ -105,6 +110,19 @@ export default async function SettingsPage({
           </p>
           <code className="text-xs bg-white border border-zinc-200 rounded px-2 py-1 break-all">
             {inboundAddress}
+          </code>
+        </div>
+      )}
+
+      {selected && portalUrl && (
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <div className="text-sm font-medium text-zinc-700">Exporter portal link</div>
+          <p className="text-xs text-zinc-500 mt-0.5 mb-2">
+            A private, read-only page where this exporter can watch their shipments and download
+            documents. Anyone with the link can view it — share it only with the exporter.
+          </p>
+          <code className="text-xs bg-white border border-zinc-200 rounded px-2 py-1 break-all">
+            {portalUrl}
           </code>
         </div>
       )}
