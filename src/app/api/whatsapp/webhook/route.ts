@@ -11,7 +11,7 @@ import {
   type SupportedMediaType,
 } from "@/lib/ai/extract-po";
 import { isOrderMessage } from "@/lib/ai/classify-order";
-import { missingRequiredFields } from "@/lib/docs/required-fields";
+import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } from "@/lib/docs/required-fields";
 import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
 import { computeProposedValue } from "@/lib/docs/compute-value";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
@@ -379,7 +379,7 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
 
   const { data: shipment } = await supabase
     .from("shipments")
-    .select("id, reference_number, status")
+    .select("id, reference_number, status, extracted_data")
     .eq("customer_id", customerId)
     .eq("status", "awaiting_customer_approval")
     // Order by reference_number (SHP-YYYYMMDD-xxxx) — a column we know exists.
@@ -471,10 +471,49 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
     return `✅ Thank you! Your documents for ${ref} are approved and locked. We'll send them to your customs broker and proceed with your shipment.`;
   }
 
-  // Not a clear "yes". Don't bounce the shipment — a "hi" or "thanks" must not
-  // change its state. Record the message so the operator can see it and decide
-  // whether it's a real change request, then nudge the customer toward the
-  // decision. The operator drives any revision from the dashboard.
+  // Maybe they're adding the OPTIONAL packing details (not an approval, not a
+  // change request). Parse the reply for packing fields, fill them in, and
+  // regenerate the packing list — non-blocking; the docs already went out.
+  const current = (shipment.extracted_data ?? {}) as Record<string, string>;
+  const missingPacking = missingPackingFields(current);
+  if (missingPacking.length > 0) {
+    const found = await parseGapReply(body.slice(0, 1000), missingPacking);
+    if (Object.keys(found).length > 0) {
+      const merged = { ...current, ...found };
+      await supabase
+        .from("shipments")
+        .update({ extracted_data: merged })
+        .eq("id", shipmentId)
+        .eq("status", "awaiting_customer_approval");
+      await supabase.from("audit_operator_action").insert({
+        operator_id: null,
+        shipment_id: shipmentId,
+        action_type: "extract",
+        old_value: current,
+        new_value: merged,
+      });
+      after(async () => {
+        try {
+          await generateCommercialInvoiceCore(shipmentId, null);
+          await generatePackingListCore(shipmentId, null);
+        } catch (err) {
+          console.error("packing_regen_failed", {
+            shipmentId,
+            name: err instanceof Error ? err.name : "unknown",
+          });
+        }
+      });
+      const added = Object.keys(found)
+        .map((k) => OPTIONAL_PACKING_LABELS[k] ?? k)
+        .join(", ");
+      return `✅ Added ${added} to ${ref} and I'm updating your packing list. Reply APPROVE once you've checked it.`;
+    }
+  }
+
+  // Not a clear "yes" and no packing details. Don't bounce the shipment — a "hi"
+  // or "thanks" must not change its state. Record the message so the operator can
+  // see it and decide whether it's a real change request, then nudge the customer
+  // toward the decision. The operator drives any revision from the dashboard.
   await supabase.from("audit_operator_action").insert({
     operator_id: null,
     shipment_id: shipmentId,

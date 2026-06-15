@@ -19,6 +19,19 @@ export function missingRequiredFields(extracted: Record<string, string>): string
   );
 }
 
+// Packing details: NOT required (docs generate without them), but Qra still
+// invites the exporter to add them to complete the packing list — optional.
+export const OPTIONAL_PACKING_LABELS: Record<string, string> = {
+  number_of_packages: "Number of packages",
+  package_type: "Package type",
+  net_weight: "Net weight",
+  gross_weight: "Gross weight",
+};
+
+export function missingPackingFields(extracted: Record<string, string>): string[] {
+  return Object.keys(OPTIONAL_PACKING_LABELS).filter((k) => !(extracted[k] ?? "").trim());
+}
+
 export function labelsFor(keys: string[]): string[] {
   return keys.map((k) => REQUIRED_FIELD_LABELS[k] ?? k);
 }

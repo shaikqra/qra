@@ -5,7 +5,7 @@ import {
   generateCommercialInvoiceCore,
   generatePackingListCore,
 } from "@/lib/docs/generate";
-import { missingRequiredFields } from "@/lib/docs/required-fields";
+import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } from "@/lib/docs/required-fields";
 import { missingFieldLines } from "@/lib/docs/gap-message";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
@@ -252,6 +252,29 @@ export async function runAutoPipeline(args: {
       }
     } else {
       await setStatus("bucket_b_review");
+    }
+
+    // Optional packing details: if the PO didn't carry weights/package count,
+    // the documents still went out — but invite the exporter to add them to
+    // complete the packing list. Non-blocking: they can reply with them or just
+    // approve. Their reply is handled by the webhook (approval branch).
+    if (autoSent) {
+      const missingPacking = missingPackingFields(merged);
+      if (missingPacking.length > 0) {
+        const { data: shipRow } = await admin
+          .from("shipments")
+          .select("customer_id, reference_number")
+          .eq("id", args.shipmentId)
+          .maybeSingle();
+        if (shipRow) {
+          const labels = missingPacking.map((k) => OPTIONAL_PACKING_LABELS[k]).join(", ");
+          await notifyCustomerWhatsApp(
+            admin,
+            shipRow.customer_id as string,
+            `📦 Optional — to complete the packing list for ${shipRow.reference_number} I can add: ${labels}. Reply with them anytime, or just reply APPROVE to proceed without them.`
+          );
+        }
+      }
     }
 
     console.log("auto_pipeline_done", {
