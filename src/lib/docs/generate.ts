@@ -224,13 +224,11 @@ export async function generatePackingListCore(
   const get = (k: string) => (d[k] ?? "").trim();
   const prof = (k: string) => (p[k] ?? "").trim();
 
+  // Packing details (packages, weights) are optional — they rarely appear on a
+  // PO. The template renders blanks for any that are missing, to be filled later.
   const required: [string, string][] = [
     ["buyer_name", "Buyer name"],
     ["product_description", "Product description"],
-    ["number_of_packages", "No. of packages"],
-    ["package_type", "Package type"],
-    ["net_weight", "Net weight"],
-    ["gross_weight", "Gross weight"],
   ];
   const missing = required.filter(([k]) => !get(k)).map(([, label]) => label);
   if (missing.length > 0) {
@@ -291,7 +289,6 @@ export async function generateCertificateOfOriginCore(
     ["destination_country", "Destination country"],
     ["hs_code", "HS code"],
     ["quantity", "Quantity"],
-    ["number_of_packages", "No. of packages"],
   ];
   const missing = required.filter(([k]) => !get(k)).map(([, label]) => label);
   if (missing.length > 0) {
