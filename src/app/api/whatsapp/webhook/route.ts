@@ -15,6 +15,7 @@ import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } 
 import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
 import { computeProposedValue } from "@/lib/docs/compute-value";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
+import { verifyAskMessage, flaggedFieldKeys, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import {
@@ -534,30 +535,35 @@ async function finishAndGenerate(
   supabase: ReturnType<typeof createSupabaseServerClient>,
   shipmentId: string,
   ref: string,
-  merged: Record<string, string>
+  merged: Record<string, string>,
+  opts: { fromStatus?: string; skipLowConfidence?: boolean } = {}
 ): Promise<string> {
+  const fromStatus = opts.fromStatus ?? "awaiting_customer_info";
   const issues = validateExtracted(merged);
-  let storedConfidence: Record<string, number> = {};
-  try {
-    storedConfidence = JSON.parse(merged["_confidence"] ?? "{}");
-  } catch {
-    storedConfidence = {};
-  }
-  const shaky = lowConfidenceFields(merged, storedConfidence);
+  // On a human-verified resume the exporter already confirmed the values, so
+  // skip the low-confidence check (it would bounce the gate forever).
+  const shaky = opts.skipLowConfidence
+    ? []
+    : lowConfidenceFields(merged, readStoredConfidence(merged));
+
+  // Data doubt → the EXPORTER verifies/corrects (blueprint G1), NOT the operator
+  // queue. Park at the verify gate and ask them on WhatsApp (the return value is
+  // the reply). Sanctions/compliance (below) is the only thing that goes to the
+  // operator.
   if (issues.length > 0 || shaky.length > 0) {
     await supabase
       .from("shipments")
-      .update({ status: "bucket_b_review" })
+      .update({ status: "awaiting_customer_verify" })
       .eq("id", shipmentId)
-      .eq("status", "awaiting_customer_info");
+      .eq("status", fromStatus);
     await supabase.from("audit_operator_action").insert({
       operator_id: null,
       shipment_id: shipmentId,
       action_type: "note",
       old_value: null,
-      new_value: { event: "trust_gate_flagged", validation_issues: issues, low_confidence_fields: shaky },
+      new_value: { event: "customer_verify_requested", validation_issues: issues, low_confidence_fields: shaky },
     });
-    return `Thanks! I've noted the details for ${ref}. Our team will double-check everything and send your documents shortly.`;
+    return verifyAskMessage(ref, merged, issues, shaky);
   }
 
   const screening = await screenShipmentParties(shipmentId, partiesFromExtracted(merged));
@@ -566,7 +572,7 @@ async function finishAndGenerate(
       .from("shipments")
       .update({ status: "sanctions_screening" })
       .eq("id", shipmentId)
-      .eq("status", "awaiting_customer_info");
+      .eq("status", fromStatus);
     return `Thanks! I've noted the details for ${ref}. Our team is running final compliance checks and will send your documents shortly.`;
   }
 
@@ -574,7 +580,7 @@ async function finishAndGenerate(
     .from("shipments")
     .update({ status: "generating_documents" })
     .eq("id", shipmentId)
-    .eq("status", "awaiting_customer_info")
+    .eq("status", fromStatus)
     .select("id");
   if (!claimed || claimed.length === 0) {
     return `Thanks — I've got everything for ${ref} and I'm preparing your documents now.`;
@@ -735,11 +741,70 @@ async function newestAffirmativeGate(customerId: string): Promise<string | null>
     .from("shipments")
     .select("status")
     .eq("customer_id", customerId)
-    .in("status", ["awaiting_customer_approval", "awaiting_order_confirm"])
+    .in("status", ["awaiting_customer_approval", "awaiting_order_confirm", "awaiting_customer_verify"])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   return (data?.status as string) ?? null;
+}
+
+// A shipment parked at awaiting_customer_verify is waiting for the EXPORTER to
+// confirm (or correct) the fields Qra wasn't sure about — the G1 gate. Any field
+// values they send are applied first; a clear CONFIRM then proceeds. A field
+// that's still malformed is re-asked (finishAndGenerate routes it back here).
+// Returns a reply when handled, or null to fall through. Never logs the body (PII).
+async function handleVerifyReply(customerId: string, body: string): Promise<string | null> {
+  const supabase = createSupabaseServerClient();
+
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, reference_number, extracted_data")
+    .eq("customer_id", customerId)
+    .eq("status", "awaiting_customer_verify")
+    .order("reference_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!shipment) return null;
+
+  const shipmentId = shipment.id as string;
+  const ref = shipment.reference_number as string;
+  const current = (shipment.extracted_data ?? {}) as Record<string, string>;
+
+  const issues = validateExtracted(current);
+  const shaky = lowConfidenceFields(current, readStoredConfidence(current));
+
+  // Did they send corrected values? Parse the reply for the flagged fields and
+  // merge them in (their value overrides what we extracted).
+  const found = await parseGapReply(body.slice(0, 1000), flaggedFieldKeys(issues, shaky));
+  let merged = current;
+  if (Object.keys(found).length > 0) {
+    merged = { ...current, ...found };
+    await supabase
+      .from("shipments")
+      .update({ extracted_data: merged })
+      .eq("id", shipmentId)
+      .eq("status", "awaiting_customer_verify");
+    await supabase.from("audit_operator_action").insert({
+      operator_id: null, // customer corrected the values
+      shipment_id: shipmentId,
+      action_type: "extract",
+      old_value: current,
+      new_value: merged,
+    });
+  }
+
+  // Proceed when they confirmed OR sent a correction (the human vouched for the
+  // values). finishAndGenerate skips the low-confidence check but still rejects a
+  // malformed field — re-asking here — and still runs sanctions screening.
+  if (isApprovalMessage(body) || Object.keys(found).length > 0) {
+    return await finishAndGenerate(supabase, shipmentId, ref, merged, {
+      fromStatus: "awaiting_customer_verify",
+      skipLowConfidence: true,
+    });
+  }
+
+  // Neither a confirm nor a usable correction — repeat the ask.
+  return verifyAskMessage(ref, current, issues, shaky);
 }
 
 // A shipment created from a forwarded EMAIL PO parks at awaiting_order_confirm
@@ -1000,10 +1065,15 @@ export async function POST(req: NextRequest) {
       // stale awaiting-approval shipment from swallowing a fresh order's CONFIRM.
       // Gap-fill (value confirmation) stays the final fallback, as before.
       const gate = await newestAffirmativeGate(customerId);
+      // "yes/confirm" answers the customer's MOST RECENT gate. The three gate
+      // handlers each only fire on their own status, so this is purely about
+      // which to try first when several are pending at once.
       const affirmativeHandlers =
-        gate === "awaiting_order_confirm"
-          ? [handleOrderConfirmReply, handleApprovalReply]
-          : [handleApprovalReply, handleOrderConfirmReply];
+        gate === "awaiting_customer_verify"
+          ? [handleVerifyReply, handleApprovalReply, handleOrderConfirmReply]
+          : gate === "awaiting_order_confirm"
+            ? [handleOrderConfirmReply, handleApprovalReply, handleVerifyReply]
+            : [handleApprovalReply, handleOrderConfirmReply, handleVerifyReply];
       for (const handler of affirmativeHandlers) {
         const reply = await handler(customerId, body);
         if (reply) return twimlResponse(reply);
@@ -1011,11 +1081,14 @@ export async function POST(req: NextRequest) {
       const gapFillReply = await handleGapFillReply(customerId, body);
       if (gapFillReply) return twimlResponse(gapFillReply);
     } else {
-      // Other text is most likely a gap-fill answer, then a change request on a
-      // doc awaiting approval. Order-confirm runs LAST so a bare "no" answering
-      // one shipment's question can't accidentally cancel a different parked order.
+      // Other text is most likely a gap-fill answer, then a verify-gate
+      // correction, then a change request on a doc awaiting approval.
+      // Order-confirm runs LAST so a bare "no" answering one shipment's question
+      // can't accidentally cancel a different parked order.
       const gapFillReply = await handleGapFillReply(customerId, body);
       if (gapFillReply) return twimlResponse(gapFillReply);
+      const verifyReply = await handleVerifyReply(customerId, body);
+      if (verifyReply) return twimlResponse(verifyReply);
       const approvalReply = await handleApprovalReply(customerId, body);
       if (approvalReply) return twimlResponse(approvalReply);
       const confirmReply = await handleOrderConfirmReply(customerId, body);

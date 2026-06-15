@@ -2,7 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { portalConfirmOrder, portalDeclineOrder, portalApproveDocs, portalCloseShipment } from "./actions";
+import {
+  portalConfirmOrder,
+  portalDeclineOrder,
+  portalApproveDocs,
+  portalCloseShipment,
+  portalVerifyOrder,
+} from "./actions";
 
 const CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered"];
 
@@ -53,6 +59,26 @@ export function GateActions({
             Decline
           </button>
         </div>
+        {error && <div className="text-xs text-red-600 mt-2">{error}</div>}
+      </div>
+    );
+  }
+
+  if (status === "awaiting_customer_verify") {
+    return (
+      <div className="rounded-xl border-2 border-amber-500 bg-white p-4">
+        <div className="text-sm font-semibold text-zinc-900">Confirm these details?</div>
+        <p className="text-xs text-zinc-500 mt-1">
+          Tap Confirm if the details above are correct. To change a value, reply on WhatsApp with the
+          correction.
+        </p>
+        <button
+          disabled={pending}
+          onClick={() => run(() => portalVerifyOrder(token, shipmentId))}
+          className="mt-3 w-full rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+        >
+          {pending ? "Working…" : "Confirm details are correct"}
+        </button>
         {error && <div className="text-xs text-red-600 mt-2">{error}</div>}
       </div>
     );

@@ -74,6 +74,51 @@ export async function portalConfirmOrder(token: string, shipmentId: string): Pro
   return { ok: true };
 }
 
+// Verify gate (G1): the exporter confirms the fields Qra wasn't sure about are
+// correct, which resumes the pipeline (skipping the low-confidence re-flag — they
+// just vouched for the values). Corrections to a value go via WhatsApp free text;
+// this button is the "yes, they're right" path. Mirrors the WhatsApp CONFIRM with
+// an atomic claim so a double-tap (or a simultaneous WhatsApp confirm) can't
+// double-run.
+export async function portalVerifyOrder(token: string, shipmentId: string): Promise<Result> {
+  if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const auth = await authorize(token, shipmentId, "awaiting_customer_verify");
+  if (!auth) return { ok: false, error: "This order can't be confirmed right now." };
+
+  const admin = createSupabaseServerClient();
+  const { data: claimed } = await admin
+    .from("shipments")
+    .update({ status: "data_extracting" })
+    .eq("id", shipmentId)
+    .eq("status", "awaiting_customer_verify")
+    .select("id");
+  if (!claimed || claimed.length === 0) return { ok: true }; // already moving
+
+  await admin.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "approve",
+    old_value: { status: "awaiting_customer_verify" },
+    new_value: { event: "order_verified", verified_by: "customer", via: "portal" },
+  });
+
+  after(async () => {
+    await notifyCustomerWhatsApp(
+      admin,
+      auth.customerId,
+      `✅ Thanks for confirming — I'm preparing your export documents for ${auth.referenceNumber} now. They'll arrive here shortly.`
+    );
+    await runAutoPipeline({
+      shipmentId,
+      extract: () => loadStoredExtraction(shipmentId),
+      skipLowConfidence: true,
+    });
+  });
+
+  revalidatePath(`/portal/${token}/${shipmentId}`);
+  return { ok: true };
+}
+
 export async function portalDeclineOrder(token: string, shipmentId: string): Promise<Result> {
   if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
   const auth = await authorize(token, shipmentId, "awaiting_order_confirm");

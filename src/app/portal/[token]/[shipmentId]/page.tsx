@@ -4,6 +4,8 @@ import { headers } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalRateLimited } from "@/lib/portal/auth";
 import { portalActionHint, portalStageIndex } from "@/lib/portal/stages";
+import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
+import { verifyFieldLines, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { isExporterVisibleDoc } from "@/lib/docs/doc-visibility";
 import { toActivities } from "@/lib/shipment-activity";
 import { Timeline } from "../timeline";
@@ -107,6 +109,16 @@ export default async function PortalShipment({
 
   const hint = portalActionHint(ship.status);
 
+  // Verify gate (G1): the exact fields Qra wasn't sure about, surfaced for the
+  // exporter to confirm or correct. Same computation as the WhatsApp message.
+  let verifyLines: string[] = [];
+  if (ship.status === "awaiting_customer_verify") {
+    const ed2 = (ed ?? {}) as Record<string, string>;
+    const issues = validateExtracted(ed2);
+    const shaky = lowConfidenceFields(ed2, readStoredConfidence(ed2));
+    verifyLines = verifyFieldLines(ed2, issues, shaky);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -117,6 +129,17 @@ export default async function PortalShipment({
           {ship.reference_number}
         </h1>
       </div>
+
+      {ship.status === "awaiting_customer_verify" && verifyLines.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="font-semibold">Please check these details</div>
+          <ul className="mt-2 space-y-1">
+            {verifyLines.map((l, i) => (
+              <li key={i}>{l.replace(/^•\s*/, "")}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <GateActions token={token} shipmentId={shipmentId} status={ship.status} />
 

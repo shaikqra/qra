@@ -24,6 +24,7 @@ const STATUS_COLORS: Record<string, string> = {
   awaiting_order_confirm: "bg-purple-100 text-purple-800",
   order_declined: "bg-zinc-200 text-zinc-700",
   awaiting_customer_info: "bg-yellow-100 text-yellow-800",
+  awaiting_customer_verify: "bg-amber-100 text-amber-800",
   generating_documents: "bg-violet-100 text-violet-800",
   sanctions_screening: "bg-orange-100 text-orange-800",
   bucket_b_review: "bg-indigo-100 text-indigo-800",

@@ -20,6 +20,9 @@ export default async function InternalLayout({
             </Link>
             {session && (
               <nav className="flex items-center gap-4 text-sm text-zinc-600">
+                <Link href="/internal/dashboard" className="hover:text-zinc-900">
+                  Dashboard
+                </Link>
                 <Link href="/internal/review" className="hover:text-zinc-900">
                   Review
                 </Link>

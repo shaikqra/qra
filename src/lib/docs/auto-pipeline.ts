@@ -9,6 +9,7 @@ import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } 
 import { missingFieldLines } from "@/lib/docs/gap-message";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
+import { verifyAskMessage } from "@/lib/docs/verify-gate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 
 // A one-line, human-readable summary of the drafted order for the confirm ask.
@@ -66,6 +67,9 @@ export async function runAutoPipeline(args: {
   shipmentId: string;
   extract: () => Promise<{ fields: PoFields; confidence: PoConfidence }>;
   confirmFirst?: boolean;
+  // Resume after the exporter cleared the G1 verify gate: they already vouched
+  // for the values, so don't re-flag low confidence (it would loop the gate).
+  skipLowConfidence?: boolean;
 }): Promise<void> {
   const admin = createSupabaseServerClient();
 
@@ -197,15 +201,16 @@ export async function runAutoPipeline(args: {
     // rules reject or the model wasn't sure about goes to the operator —
     // the agent may not act on data it can't vouch for.
     const issues = validateExtracted(merged);
-    const shaky = lowConfidenceFields(merged, confidence);
+    // On a human-verified resume the exporter already confirmed the values, so
+    // don't re-flag low confidence (it would loop the verify gate forever).
+    const shaky = args.skipLowConfidence ? [] : lowConfidenceFields(merged, confidence);
 
     // Packing details are optional and vary by PO format, so a shaky packing
     // value must NOT halt the shipment (the same rule the gap-fill and the doc
     // generators already follow). Drop any low-confidence packing value — we
     // won't put a weight we don't trust on a customs document — and let the
     // optional packing-ask below invite the exporter to add it. Only shaky
-    // required / critical fields (parties, money, customs) still pause for the
-    // operator review desk.
+    // required / critical fields (parties, money, customs) still pause.
     const optionalPackingKeys = new Set(Object.keys(OPTIONAL_PACKING_LABELS));
     const shakyPacking = shaky.filter((f) => optionalPackingKeys.has(f));
     const shakyBlocking = shaky.filter((f) => !optionalPackingKeys.has(f));
@@ -224,20 +229,47 @@ export async function runAutoPipeline(args: {
       });
     }
 
+    // Data doubt (a malformed field or a low-confidence one) is the EXPORTER's to
+    // resolve — it's their PO. Surface the exact fields on WhatsApp and park at
+    // the verify gate (blueprint G1: "the extracted order is correct"). This is
+    // NOT the operator's queue — only sanctions/compliance (below) goes there.
     if (issues.length > 0 || shakyBlocking.length > 0) {
-      await setStatus("bucket_b_review");
+      const { data: shipRow } = await admin
+        .from("shipments")
+        .select("customer_id, reference_number")
+        .eq("id", args.shipmentId)
+        .maybeSingle();
+      await setStatus("awaiting_customer_verify");
       await admin.from("audit_operator_action").insert({
         operator_id: null,
         shipment_id: args.shipmentId,
         action_type: "note",
         old_value: null,
         new_value: {
-          event: "trust_gate_flagged",
+          event: "customer_verify_requested",
           validation_issues: issues,
           low_confidence_fields: shakyBlocking,
         },
       });
-      console.log("auto_pipeline_trust_gate", {
+      if (shipRow) {
+        const notified = await notifyCustomerWhatsApp(
+          admin,
+          shipRow.customer_id as string,
+          verifyAskMessage(shipRow.reference_number as string, merged, issues, shakyBlocking)
+        );
+        if (!notified) {
+          // Couldn't reach the exporter — surface it so the order isn't stuck
+          // invisibly; the operator can pick it up from the board.
+          await admin.from("audit_operator_action").insert({
+            operator_id: null,
+            shipment_id: args.shipmentId,
+            action_type: "note",
+            old_value: null,
+            new_value: { event: "customer_verify_notify_failed" },
+          });
+        }
+      }
+      console.log("auto_pipeline_verify_gate", {
         shipmentId: args.shipmentId,
         issueCount: issues.length,
         lowConfidenceCount: shakyBlocking.length,

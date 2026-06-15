@@ -24,6 +24,7 @@ const STATUS_ACTIVITY: Record<string, { icon: string; text: string; tone: string
   data_extracting: { icon: "🤖", text: "Reading the PO and extracting the details", tone: "text-zinc-700" },
   awaiting_order_confirm: { icon: "📋", text: "Read the order — waiting for it to be confirmed", tone: "text-amber-700" },
   awaiting_customer_info: { icon: "💬", text: "Asked the customer for missing details", tone: "text-yellow-700" },
+  awaiting_customer_verify: { icon: "📋", text: "Asked the customer to check a couple of details", tone: "text-amber-700" },
   generating_documents: { icon: "📄", text: "Generating the documents", tone: "text-violet-700" },
   bucket_b_review: { icon: "👀", text: "Flagged for your review", tone: "text-indigo-700" },
   sanctions_screening: { icon: "🛑", text: "Held for sanctions review", tone: "text-orange-700" },
@@ -66,10 +67,13 @@ function noteActivity(
       return { icon: "⚠️", text: "Couldn't complete sanctions screening — held to be safe", tone: "text-orange-700" };
     case "trust_gate_flagged":
       return { icon: "👀", text: "Some details needed checking — flagged for your review", tone: "text-indigo-700" };
+    case "customer_verify_requested":
+      return { icon: "📋", text: "Asked the customer to confirm a few details", tone: "text-amber-700" };
     case "value_amount_computed_and_confirmed":
       return { icon: "🧮", text: "Calculated the invoice value and the customer confirmed it", tone: "text-zinc-700" };
     case "customer_notify_failed":
     case "order_confirm_notify_failed":
+    case "customer_verify_notify_failed":
       return { icon: "⚠️", text: "Couldn't reach the customer on WhatsApp", tone: "text-orange-700" };
     default:
       // PRIVACY: only narrate KNOWN, exporter-safe events. Operator free-text
@@ -109,6 +113,8 @@ export function toActivities(rows: AuditRow[]): Activity[] {
       const ev = (r.new_value as { event?: string } | null)?.event;
       if (ev === "order_confirmed") {
         out.push({ ...base, actor: "Customer", icon: "✅", text: "Order confirmed", tone: "text-green-700" });
+      } else if (ev === "order_verified") {
+        out.push({ ...base, actor: "Customer", icon: "✅", text: "Confirmed the order details", tone: "text-green-700" });
       } else {
         out.push({
           ...base,

@@ -20,6 +20,7 @@ export function portalStageIndex(status: string): number {
     case "awaiting_order_confirm":
       return 0;
     case "awaiting_customer_info":
+    case "awaiting_customer_verify":
     case "generating_documents":
     case "sanctions_screening":
     case "bucket_b_review":
@@ -52,6 +53,8 @@ export function portalActionHint(status: string): string | null {
     case "awaiting_customer_info":
       // Gap-fill needs a free-text reply — that still happens on WhatsApp.
       return "We need a few more details — reply on WhatsApp.";
+    case "awaiting_customer_verify":
+      return "Please check a couple of details — confirm below, or reply on WhatsApp to correct.";
     case "awaiting_customer_approval":
       return "Your documents are ready to review and approve.";
     default:
