@@ -69,13 +69,14 @@ export async function POST(req: NextRequest) {
 
   if (rateLimited(customerId)) return new Response("rate_limited", { status: 200 });
 
-  const file = await fetchInboundAttachment(emailId);
-  if (!file) {
-    // The webhook is metadata-only and v1 ingests PDF/image attachments. A
-    // body-only PO has nothing to read here — log and acknowledge.
-    console.error("inbound_no_attachment", { emailId: emailId.slice(0, 8) });
-    return new Response("no_attachment", { status: 200 });
+  const att = await fetchInboundAttachment(emailId);
+  if (!att.ok) {
+    // Echo the precise reason in the body so it's visible in Resend's webhook
+    // log (status codes / JSON shape only — no PII). Acknowledge with 200.
+    console.error("inbound_no_attachment", { emailId: emailId.slice(0, 8), reason: att.reason });
+    return new Response(`no_attachment:${att.reason}`, { status: 200 });
   }
+  const file = att.file;
 
   const result = await ingestEmailPo(
     customerId,

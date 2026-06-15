@@ -100,14 +100,22 @@ export function verifyResendSignature(
   });
 }
 
-type AttachmentMeta = { download_url?: string; content_type?: string; size?: number; filename?: string };
+type AttachmentMeta = {
+  id?: string;
+  download_url?: string;
+  content_type?: string;
+  size?: number;
+  filename?: string;
+};
+type InboundFile = { base64: string; mediaType: InboundMediaType; bytes: Buffer; contentType: string };
+// Either the file, or a short reason that's safe to echo in the webhook response
+// (status codes / JSON key names / content-types only — never PII).
+export type AttachmentResult = { ok: true; file: InboundFile } | { ok: false; reason: string };
 
 // Pull the first usable PO attachment (PDF, else image) for a received email.
-export async function fetchInboundAttachment(
-  emailId: string
-): Promise<{ base64: string; mediaType: InboundMediaType; bytes: Buffer; contentType: string } | null> {
+export async function fetchInboundAttachment(emailId: string): Promise<AttachmentResult> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) return null;
+  if (!apiKey) return { ok: false, reason: "no_api_key" };
 
   let listRes: Response;
   try {
@@ -115,42 +123,36 @@ export async function fetchInboundAttachment(
       `https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}/attachments`,
       { headers: { Authorization: `Bearer ${apiKey}` } }
     );
-  } catch (e) {
-    console.error("inbound_attachment_list_failed", e instanceof Error ? e.name : "unknown");
-    return null;
+  } catch {
+    return { ok: false, reason: "list_threw" };
   }
-  if (!listRes.ok) {
-    console.error("inbound_attachment_list_status", listRes.status);
-    return null;
+  if (!listRes.ok) return { ok: false, reason: `list_status_${listRes.status}` };
+
+  const listJson = (await listRes.json().catch(() => null)) as Record<string, unknown> | null;
+  const atts = (Array.isArray(listJson?.data) ? listJson.data : []) as AttachmentMeta[];
+  if (atts.length === 0) {
+    // No items — show the JSON's top-level keys so we can see the real shape.
+    return { ok: false, reason: `list_empty[${listJson ? Object.keys(listJson).join("-") : "null"}]` };
   }
 
-  const listJson = (await listRes.json().catch(() => null)) as { data?: AttachmentMeta[] } | null;
-  const atts = listJson?.data ?? [];
   const pick =
     atts.find((a) => (a.content_type ?? "").includes("pdf")) ??
     atts.find((a) => (a.content_type ?? "").startsWith("image/"));
-  if (!pick?.download_url) return null;
+  if (!pick) return { ok: false, reason: `no_pdf_image[${atts.map((a) => a.content_type).join(",")}]` };
+  if (!pick.download_url) return { ok: false, reason: `no_url[${Object.keys(pick).join("-")}]` };
   if (typeof pick.size === "number" && pick.size > MAX_FILE_SIZE_BYTES) {
-    console.error("inbound_attachment_too_large", { size: pick.size });
-    return null;
+    return { ok: false, reason: "too_large" };
   }
 
   let dlRes: Response;
   try {
     dlRes = await fetch(pick.download_url);
-  } catch (e) {
-    console.error("inbound_attachment_dl_failed", e instanceof Error ? e.name : "unknown");
-    return null;
+  } catch {
+    return { ok: false, reason: "dl_threw" };
   }
-  if (!dlRes.ok) {
-    console.error("inbound_attachment_dl_status", dlRes.status);
-    return null;
-  }
+  if (!dlRes.ok) return { ok: false, reason: `dl_status_${dlRes.status}` };
   const arr = await dlRes.arrayBuffer();
-  if (arr.byteLength > MAX_FILE_SIZE_BYTES) {
-    console.error("inbound_attachment_too_large_bytes", { size: arr.byteLength });
-    return null;
-  }
+  if (arr.byteLength > MAX_FILE_SIZE_BYTES) return { ok: false, reason: "dl_too_large" };
 
   const bytes = Buffer.from(arr);
   const ct = (pick.content_type ?? "application/pdf").toLowerCase();
@@ -159,7 +161,7 @@ export async function fetchInboundAttachment(
     : ct.includes("png")
       ? "image/png"
       : "image/jpeg";
-  return { base64: bytes.toString("base64"), mediaType, bytes, contentType: ct };
+  return { ok: true, file: { base64: bytes.toString("base64"), mediaType, bytes, contentType: ct } };
 }
 
 // Create the shipment, store the PO, and audit it (source = email). Mirrors the
