@@ -526,6 +526,86 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
   return `Thanks for your message about ${ref}. If the documents look good, reply APPROVE to approve them. If you'd like any changes, send us the details and our team will take care of it.`;
 }
 
+// Post-info completion: trust gate -> denied-party screening -> generate + send.
+// Returns the reply to the customer. Shared by the gap-fill completion path and
+// the "advance a complete-but-stuck shipment" path, so a shipment that already
+// has everything it needs can never be stranded at awaiting_customer_info.
+async function finishAndGenerate(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  shipmentId: string,
+  ref: string,
+  merged: Record<string, string>
+): Promise<string> {
+  const issues = validateExtracted(merged);
+  let storedConfidence: Record<string, number> = {};
+  try {
+    storedConfidence = JSON.parse(merged["_confidence"] ?? "{}");
+  } catch {
+    storedConfidence = {};
+  }
+  const shaky = lowConfidenceFields(merged, storedConfidence);
+  if (issues.length > 0 || shaky.length > 0) {
+    await supabase
+      .from("shipments")
+      .update({ status: "bucket_b_review" })
+      .eq("id", shipmentId)
+      .eq("status", "awaiting_customer_info");
+    await supabase.from("audit_operator_action").insert({
+      operator_id: null,
+      shipment_id: shipmentId,
+      action_type: "note",
+      old_value: null,
+      new_value: { event: "trust_gate_flagged", validation_issues: issues, low_confidence_fields: shaky },
+    });
+    return `Thanks! I've noted the details for ${ref}. Our team will double-check everything and send your documents shortly.`;
+  }
+
+  const screening = await screenShipmentParties(shipmentId, partiesFromExtracted(merged));
+  if (!screening.proceed) {
+    await supabase
+      .from("shipments")
+      .update({ status: "sanctions_screening" })
+      .eq("id", shipmentId)
+      .eq("status", "awaiting_customer_info");
+    return `Thanks! I've noted the details for ${ref}. Our team is running final compliance checks and will send your documents shortly.`;
+  }
+
+  const { data: claimed } = await supabase
+    .from("shipments")
+    .update({ status: "generating_documents" })
+    .eq("id", shipmentId)
+    .eq("status", "awaiting_customer_info")
+    .select("id");
+  if (!claimed || claimed.length === 0) {
+    return `Thanks — I've got everything for ${ref} and I'm preparing your documents now.`;
+  }
+
+  after(async () => {
+    const admin = createSupabaseServerClient();
+    const toOperatorQueue = async () => {
+      await admin
+        .from("shipments")
+        .update({ status: "bucket_b_review" })
+        .eq("id", shipmentId)
+        .eq("status", "generating_documents");
+    };
+    try {
+      const invoice = await generateCommercialInvoiceCore(shipmentId, null);
+      const packing = await generatePackingListCore(shipmentId, null);
+      if (invoice.ok && packing.ok) {
+        const sendResult = await sendDocsToCustomerCore(shipmentId, null);
+        if (sendResult.ok) return;
+      }
+      await toOperatorQueue();
+    } catch (err) {
+      console.error("gap_fill_autosend_failed", { shipmentId, name: err instanceof Error ? err.name : "unknown" });
+      await toOperatorQueue();
+    }
+  });
+
+  return `✅ That's everything for ${ref} — thank you! I'm preparing your draft documents now; they'll arrive in this chat in about a minute. Reply APPROVE once you've checked them.`;
+}
+
 // If this customer has a shipment waiting on missing PO fields, parse their
 // text for those values, merge them in, and generate documents once complete.
 // Returns a reply string when it handled the message, or null to fall through.
@@ -547,7 +627,23 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
   const shipment = (candidates ?? []).find(
     (s) => missingRequiredFields((s.extracted_data ?? {}) as Record<string, string>).length > 0
   );
-  if (!shipment) return null;
+  if (!shipment) {
+    // No shipment needs info — but a COMPLETE one may be stranded at this status
+    // (its fields got finished by a rule change or an out-of-order reply). Advance
+    // it instead of going silent (which dropped the reply to the generic chat).
+    const stuck = (candidates ?? []).find(
+      (s) => missingRequiredFields((s.extracted_data ?? {}) as Record<string, string>).length === 0
+    );
+    if (stuck) {
+      return finishAndGenerate(
+        supabase,
+        stuck.id as string,
+        stuck.reference_number as string,
+        (stuck.extracted_data ?? {}) as Record<string, string>
+      );
+    }
+    return null;
+  }
 
   const shipmentId = shipment.id as string;
   const ref = shipment.reference_number as string;
@@ -611,99 +707,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
     });
 
     if (stillMissing.length === 0) {
-      // Trust gate: rules must accept the merged data before the agent acts
-      // on it, and originally-extracted fields the model was unsure about
-      // still need a human look (customer-filled fields carry confidence 1.0
-      // from extraction, since they were blank there). Failures route to the
-      // operator queue, not to generation.
-      const issues = validateExtracted(merged);
-      let storedConfidence: Record<string, number> = {};
-      try {
-        storedConfidence = JSON.parse(merged["_confidence"] ?? "{}");
-      } catch {
-        storedConfidence = {};
-      }
-      const shaky = lowConfidenceFields(merged, storedConfidence);
-      if (issues.length > 0 || shaky.length > 0) {
-        await supabase
-          .from("shipments")
-          .update({ status: "bucket_b_review" })
-          .eq("id", shipmentId)
-          .eq("status", "awaiting_customer_info");
-        await supabase.from("audit_operator_action").insert({
-          operator_id: null,
-          shipment_id: shipmentId,
-          action_type: "note",
-          old_value: null,
-          new_value: {
-            event: "trust_gate_flagged",
-            validation_issues: issues,
-            low_confidence_fields: shaky,
-          },
-        });
-        console.log("gap_fill_trust_gate", {
-          shipmentId,
-          issueCount: issues.length,
-          lowConfidenceCount: shaky.length,
-        });
-        return `Thanks! I've noted the details for ${ref}. Our team will double-check everything and send your documents shortly.`;
-      }
-
-      // Denied-party screening on the buyer before the agent may act.
-      const screening = await screenShipmentParties(shipmentId, partiesFromExtracted(merged));
-      if (!screening.proceed) {
-        await supabase
-          .from("shipments")
-          .update({ status: "sanctions_screening" })
-          .eq("id", shipmentId)
-          .eq("status", "awaiting_customer_info");
-        return `Thanks! I've noted the details for ${ref}. Our team is running final compliance checks and will send your documents shortly.`;
-      }
-
-      // Atomic claim: only the request that actually flips the status gets to
-      // generate. A concurrent reply matches zero rows here and must not
-      // generate a duplicate document set.
-      const { data: claimed } = await supabase
-        .from("shipments")
-        .update({ status: "generating_documents" })
-        .eq("id", shipmentId)
-        .eq("status", "awaiting_customer_info")
-        .select("id");
-      if (!claimed || claimed.length === 0) {
-        return `Thanks — I've got everything for ${ref} and I'm preparing your documents now.`;
-      }
-
-      // Generate + send in the background so the TwiML reply beats Twilio's
-      // ~15s webhook timeout. Agentic flow: documents go straight to the
-      // customer; their APPROVE is the human gate. Any failure (including a
-      // partial/thrown send) routes to the operator queue.
-      after(async () => {
-        const admin = createSupabaseServerClient();
-        const toOperatorQueue = async () => {
-          await admin
-            .from("shipments")
-            .update({ status: "bucket_b_review" })
-            .eq("id", shipmentId)
-            .eq("status", "generating_documents");
-        };
-        try {
-          const invoice = await generateCommercialInvoiceCore(shipmentId, null);
-          const packing = await generatePackingListCore(shipmentId, null);
-          if (invoice.ok && packing.ok) {
-            const sendResult = await sendDocsToCustomerCore(shipmentId, null);
-            if (sendResult.ok) return;
-          }
-          await toOperatorQueue();
-        } catch (err) {
-          console.error("gap_fill_autosend_failed", {
-            shipmentId,
-            name: err instanceof Error ? err.name : "unknown",
-          });
-          await toOperatorQueue();
-        }
-      });
-
-      return `✅ That's everything for ${ref} — thank you! I'm preparing your draft documents now; they'll arrive in this chat in about a minute. Reply APPROVE once you've checked them.`;
+      return await finishAndGenerate(supabase, shipmentId, ref, merged);
     }
 
     return (
