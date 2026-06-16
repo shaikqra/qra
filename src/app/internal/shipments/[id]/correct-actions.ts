@@ -6,7 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { proposeCorrection } from "@/lib/ai/apply-correction";
 import { reviewDocuments, type DocReviewFlag } from "@/lib/ai/review-documents";
 import { classifyHsCode, type HsResult } from "@/lib/ai/classify-hs";
-import { generateCommercialInvoiceCore, generatePackingListCore } from "@/lib/docs/generate";
+import { generateCoreDocSet } from "@/lib/docs/generate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { validateExtracted } from "@/lib/docs/validate";
 
@@ -209,8 +209,7 @@ export async function applyAiCorrection(shipmentId: string, instruction: string)
 
   // Clean — redraft the documents (new versions; the old ones were never
   // approved, so nothing immutable is touched).
-  await generateCommercialInvoiceCore(shipmentId, session.userId);
-  await generatePackingListCore(shipmentId, session.userId);
+  await generateCoreDocSet(shipmentId, session.userId);
 
   revalidatePath(`/internal/shipments/${shipmentId}`);
   return ok;

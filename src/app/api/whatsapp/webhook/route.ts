@@ -18,10 +18,7 @@ import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { verifyAskMessage, flaggedFieldKeys, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
-import {
-  generateCommercialInvoiceCore,
-  generatePackingListCore,
-} from "@/lib/docs/generate";
+import { generateCoreDocSet } from "@/lib/docs/generate";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
@@ -495,8 +492,9 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
       });
       after(async () => {
         try {
-          await generateCommercialInvoiceCore(shipmentId, null);
-          await generatePackingListCore(shipmentId, null);
+          // Redraft the whole set so the new packing weights flow into the
+          // packing list AND the shipping-bill data sheet, not just one doc.
+          await generateCoreDocSet(shipmentId, null);
         } catch (err) {
           console.error("packing_regen_failed", {
             shipmentId,
@@ -596,9 +594,8 @@ async function finishAndGenerate(
         .eq("status", "generating_documents");
     };
     try {
-      const invoice = await generateCommercialInvoiceCore(shipmentId, null);
-      const packing = await generatePackingListCore(shipmentId, null);
-      if (invoice.ok && packing.ok) {
+      const docs = await generateCoreDocSet(shipmentId, null);
+      if (docs.essentialOk) {
         const sendResult = await sendDocsToCustomerCore(shipmentId, null);
         if (sendResult.ok) return;
       }

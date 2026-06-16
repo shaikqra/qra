@@ -9,6 +9,8 @@ const DOC_LABELS: Record<string, string> = {
   packing_list: "Packing List",
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
+  export_declaration: "Export Declaration / Annexure",
+  shipping_bill_pack: "Shipping Bill Checklist",
 };
 
 // Send the latest generated document of each type to the shipment's customer
@@ -57,22 +59,12 @@ export async function sendDocsToCustomerCore(
     .order("generated_at", { ascending: false });
 
   const latest = new Map<string, string>();
-  let brokerOnlyCount = 0;
   for (const doc of (docs ?? []) as { doc_type: string; storage_path: string }[]) {
-    if (NOT_FOR_CUSTOMER.has(doc.doc_type)) {
-      brokerOnlyCount++;
-      continue;
-    }
+    if (NOT_FOR_CUSTOMER.has(doc.doc_type)) continue;
     if (!latest.has(doc.doc_type)) latest.set(doc.doc_type, doc.storage_path);
   }
   if (latest.size === 0) {
-    return {
-      ok: false,
-      error:
-        brokerOnlyCount > 0
-          ? "Only broker-facing documents exist (the Shipping Bill sheet isn't sent to customers) — generate the invoice/packing list first."
-          : "No generated documents to send",
-    };
+    return { ok: false, error: "No generated documents to send" };
   }
 
   const client = twilio(sid, token);

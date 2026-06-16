@@ -12,6 +12,7 @@ import { loadRankedFreight } from "@/lib/freight/load";
 import { Timeline } from "../timeline";
 import { GateActions } from "./gate-actions";
 import { FreightGate } from "./freight-gate";
+import { OptionalDocs } from "./optional-docs";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ const DOC_LABELS: Record<string, string> = {
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
   export_declaration: "Export Declaration / Annexure",
+  shipping_bill_pack: "Shipping Bill Checklist",
 };
 
 type Shipment = {
@@ -81,7 +83,7 @@ export default async function PortalShipment({
 
   // Documents appear only once they've been sent to the exporter for approval
   // (the "Your approval" stage onward) — never an in-progress draft we're still
-  // reviewing, and never the broker-only Shipping Bill sheet (NOT_FOR_CUSTOMER).
+  // reviewing. isExporterVisibleDoc filters out any broker-only doc types.
   const files: { label: string; url: string }[] = [];
   if (portalStageIndex(ship.status) >= 2) {
     const { data: docRows } = await admin
@@ -204,6 +206,11 @@ export default async function PortalShipment({
                 <span className="ml-auto text-xs font-semibold text-zinc-500">Open ↗</span>
               </a>
             ))}
+          </div>
+        )}
+        {portalStageIndex(ship.status) >= 2 && (
+          <div className="mt-3">
+            <OptionalDocs token={token} shipmentId={shipmentId} />
           </div>
         )}
       </section>

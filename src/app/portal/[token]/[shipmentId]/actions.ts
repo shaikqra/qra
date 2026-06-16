@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalWriteRateLimited } from "@/lib/portal/auth";
 import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline";
 import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
+import { generateProformaInvoiceCore, generateCertificateOfOriginCore } from "@/lib/docs/generate";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
 import { negotiateTargetFor } from "@/lib/freight/rank-quotes";
@@ -390,6 +391,51 @@ export async function portalCloseShipment(token: string, shipmentId: string): Pr
     old_value: null,
     new_value: { status: "completed", closed_by: "customer", via: "portal" },
   });
+
+  revalidatePath(`/portal/${token}/${shipmentId}`);
+  return { ok: true };
+}
+
+// Optional documents the exporter can pull on demand from the portal: the
+// proforma invoice (a pre-order quote) and the certificate of origin (needed
+// only for some destinations). Both are plain template PDFs — no model call —
+// drafted from the same order data, and appear in the documents list above once
+// generated. generatedBy null = exporter-initiated via the portal. Does not
+// touch shipment status, so it's safe at any stage.
+export async function portalGenerateDoc(
+  token: string,
+  shipmentId: string,
+  kind: "proforma_invoice" | "certificate_of_origin"
+): Promise<Result> {
+  if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
+  if (kind !== "proforma_invoice" && kind !== "certificate_of_origin") {
+    return { ok: false, error: "Unknown document." };
+  }
+  const customer = await resolveCustomerByPortalToken(token);
+  if (!customer) return { ok: false, error: "This link has expired — please reopen it." };
+
+  const admin = createSupabaseServerClient();
+  // Scope to THIS customer — never draft against another exporter's shipment.
+  const { data: ship } = await admin
+    .from("shipments")
+    .select("id")
+    .eq("id", shipmentId)
+    .eq("customer_id", customer.id)
+    .maybeSingle();
+  if (!ship) return { ok: false, error: "Shipment not found." };
+
+  const result =
+    kind === "proforma_invoice"
+      ? await generateProformaInvoiceCore(shipmentId, null)
+      : await generateCertificateOfOriginCore(shipmentId, null);
+  if (!result.ok) {
+    // Keep the actionable "fill these fields first" hint; never surface a raw
+    // storage/DB message to the exporter.
+    const friendly = result.error.startsWith("Fill these fields first")
+      ? result.error
+      : "Couldn't generate that document — please try again in a moment.";
+    return { ok: false, error: friendly };
+  }
 
   revalidatePath(`/portal/${token}/${shipmentId}`);
   return { ok: true };

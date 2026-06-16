@@ -484,3 +484,32 @@ export async function generateShippingBillPackCore(
     generatedBy,
   });
 }
+
+// The core document set Qra drafts for every shipment and sends to the exporter:
+// commercial invoice + packing list (the two ESSENTIALS — they need only the
+// minimal order fields), plus the export declaration and shipping-bill data sheet
+// when the data supports them (those two also need HS code + destination).
+// Best-effort on the latter two: a PO still missing its HS code gets the invoice +
+// packing now, and the declaration/sheet are drafted the moment the field arrives
+// (the gap-fill reply or an operator correction re-runs this). It never blocks the
+// send. Returns whether the two essentials generated, so the caller decides between
+// sending to the exporter (essentials ok) and routing to the operator queue.
+export async function generateCoreDocSet(
+  shipmentId: string,
+  generatedBy: string | null
+): Promise<{ essentialOk: boolean; generated: string[]; skipped: string[] }> {
+  const generated: string[] = [];
+  const skipped: string[] = [];
+  const run = async (docType: string, fn: Promise<GenerateResult>) => {
+    const r = await fn;
+    (r.ok ? generated : skipped).push(docType);
+    return r.ok;
+  };
+
+  const invoiceOk = await run("commercial_invoice", generateCommercialInvoiceCore(shipmentId, generatedBy));
+  const packingOk = await run("packing_list", generatePackingListCore(shipmentId, generatedBy));
+  await run("export_declaration", generateExportDeclarationCore(shipmentId, generatedBy));
+  await run("shipping_bill_pack", generateShippingBillPackCore(shipmentId, generatedBy));
+
+  return { essentialOk: invoiceOk && packingOk, generated, skipped };
+}

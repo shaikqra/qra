@@ -1,10 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import type { PoFields, PoConfidence } from "@/lib/ai/extract-po";
-import {
-  generateCommercialInvoiceCore,
-  generatePackingListCore,
-} from "@/lib/docs/generate";
+import { generateCoreDocSet } from "@/lib/docs/generate";
 import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } from "@/lib/docs/required-fields";
 import { missingFieldLines } from "@/lib/docs/gap-message";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
@@ -288,15 +285,16 @@ export async function runAutoPipeline(args: {
 
     await setStatus("generating_documents");
 
-    // Generate what the data supports; generatedBy null = system.
-    const invoice = await generateCommercialInvoiceCore(args.shipmentId, null);
-    const packing = await generatePackingListCore(args.shipmentId, null);
+    // Draft the core set: commercial invoice + packing list (always), plus the
+    // export declaration + shipping-bill data sheet when HS/destination are
+    // present. generatedBy null = system.
+    const docs = await generateCoreDocSet(args.shipmentId, null);
 
-    // Clean path: documents generated — send them straight to the customer
-    // for approval (agentic flow; the customer is the human gate). Anything
-    // that didn't generate cleanly goes to the operator's review queue.
+    // Clean path: the essentials generated — send the set straight to the
+    // customer for approval (agentic flow; the customer is the human gate).
+    // If even the essentials couldn't draft, route to the operator's queue.
     let autoSent = false;
-    if (invoice.ok && packing.ok) {
+    if (docs.essentialOk) {
       try {
         const sendResult = await sendDocsToCustomerCore(args.shipmentId, null);
         autoSent = sendResult.ok;
@@ -337,8 +335,8 @@ export async function runAutoPipeline(args: {
 
     console.log("auto_pipeline_done", {
       shipmentId: args.shipmentId,
-      invoiceOk: invoice.ok,
-      packingOk: packing.ok,
+      generated: docs.generated,
+      skipped: docs.skipped,
       autoSent,
     });
   } catch (e) {
