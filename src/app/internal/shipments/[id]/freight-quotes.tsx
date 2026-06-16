@@ -3,19 +3,21 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { addFreightQuoteAction } from "./freight-actions";
-import type { RankedQuote } from "@/lib/freight/rank-quotes";
+import type { RankedQuote, FreightQuote } from "@/lib/freight/rank-quotes";
 
 // Carrier quotes + ranking. Operator pastes a carrier reply; the Freight agent
-// parses it and the quotes are ranked. The recommendation is the exporter's call
-// at G4 (which will surface in the exporter portal).
+// parses it and the quotes are ranked. The Accept/Negotiate/Reject decision (G4)
+// is the EXPORTER's, in their portal — this view is read-only ranking + status.
 export function FreightQuotes({
   shipmentId,
   quotes,
+  awarded,
   recommendationId,
   reason,
 }: {
   shipmentId: string;
   quotes: RankedQuote[];
+  awarded: FreightQuote | null;
   recommendationId: string | null;
   reason: string;
 }) {
@@ -46,6 +48,13 @@ export function FreightQuotes({
         the quotes. The recommendation is the exporter&apos;s call at G4.
       </p>
 
+      {awarded && (
+        <div className="mt-3 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900">
+          ✓ Freight awarded: {awarded.carrierName || "carrier"}
+          {awarded.rateAmount !== null ? ` — ${awarded.rateCurrency} ${awarded.rateAmount}` : ""}
+        </div>
+      )}
+
       {quotes.length > 0 && (
         <>
           {reason && (
@@ -71,6 +80,11 @@ export function FreightQuotes({
                     <td className="py-1.5 pr-2 font-medium text-zinc-800">
                       {q.carrierName || "—"}
                       {q.id === recommendationId && <span className="ml-1 text-emerald-700">★</span>}
+                      {q.decision === "negotiate" && (
+                        <span className="ml-1 text-[10px] font-semibold text-amber-700">
+                          negotiating{q.negotiateTarget !== null ? ` → ${q.rateCurrency} ${q.negotiateTarget}` : ""}
+                        </span>
+                      )}
                     </td>
                     <td className="py-1.5 pr-2 text-zinc-700">{fmtRate(q)}</td>
                     <td className="py-1.5 pr-2 text-zinc-700">{q.transitDays !== null ? `${q.transitDays}d` : "—"}</td>

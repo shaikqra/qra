@@ -8,6 +8,7 @@ import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline"
 import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
+import { negotiateTargetFor } from "@/lib/freight/rank-quotes";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -221,6 +222,147 @@ export async function portalApproveDocs(token: string, shipmentId: string): Prom
 // shipment reaches its terminal state. (The full G8 in the Bible also reconciles
 // proceeds + eBRC — that's Treasury, a P2 agent — so this is the close itself.)
 const CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered"];
+
+// --- Freight G4 gate (exporter) -------------------------------------------
+// The exporter accepts / negotiates / rejects a carrier quote. Authorize:
+// token -> customer, the shipment is theirs, the quote is on that shipment. No
+// lifecycle-status gate (freight isn't in the state machine). Each write is
+// guarded with `.or("decision.is.null,decision.eq.negotiate")` so an already
+// awarded/rejected quote can't be re-decided, and audited via:'portal'.
+async function authorizeFreightQuote(
+  token: string,
+  shipmentId: string,
+  quoteId: string
+): Promise<{ customerId: string; rateAmount: number | null } | null> {
+  const customer = await resolveCustomerByPortalToken(token);
+  if (!customer) return null;
+  const admin = createSupabaseServerClient();
+  const { data: ship } = await admin
+    .from("shipments")
+    .select("id")
+    .eq("id", shipmentId)
+    .eq("customer_id", customer.id)
+    .maybeSingle();
+  if (!ship) return null;
+  const { data: quote } = await admin
+    .from("freight_quotes")
+    .select("id, rate_amount")
+    .eq("id", quoteId)
+    .eq("shipment_id", shipmentId)
+    .maybeSingle();
+  if (!quote) return null;
+  return { customerId: customer.id, rateAmount: quote.rate_amount == null ? null : Number(quote.rate_amount) };
+}
+
+async function shipmentHasAward(
+  admin: ReturnType<typeof createSupabaseServerClient>,
+  shipmentId: string
+): Promise<boolean> {
+  const { data } = await admin
+    .from("freight_quotes")
+    .select("id")
+    .eq("shipment_id", shipmentId)
+    .eq("decision", "awarded")
+    .limit(1)
+    .maybeSingle();
+  return !!data;
+}
+
+export async function portalAwardFreight(token: string, shipmentId: string, quoteId: string): Promise<Result> {
+  if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const auth = await authorizeFreightQuote(token, shipmentId, quoteId);
+  if (!auth) return { ok: false, error: "This quote can't be awarded right now." };
+
+  const admin = createSupabaseServerClient();
+  // Fast-path friendly message; the freight_quotes_one_award unique index is the
+  // real, race-proof guarantee (a concurrent second award fails on insert below).
+  if (await shipmentHasAward(admin, shipmentId)) {
+    return { ok: false, error: "A carrier is already awarded for this shipment." };
+  }
+  const { data: claimed, error: updErr } = await admin
+    .from("freight_quotes")
+    .update({ decision: "awarded", decided_at: new Date().toISOString() })
+    .eq("id", quoteId)
+    .eq("shipment_id", shipmentId)
+    .or("decision.is.null,decision.eq.negotiate")
+    .select("id");
+  if (updErr) {
+    // Unique-index violation = a concurrent award already won this shipment.
+    return { ok: false, error: "A carrier is already awarded for this shipment." };
+  }
+  if (!claimed || claimed.length === 0) return { ok: false, error: "This quote can't be awarded right now." };
+
+  await admin.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "approve",
+    old_value: null,
+    new_value: { event: "freight_awarded", quote_id: quoteId, decided_by: "customer", via: "portal" },
+  });
+  revalidatePath(`/portal/${token}/${shipmentId}`);
+  return { ok: true };
+}
+
+export async function portalRejectFreightQuote(token: string, shipmentId: string, quoteId: string): Promise<Result> {
+  if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const auth = await authorizeFreightQuote(token, shipmentId, quoteId);
+  if (!auth) return { ok: false, error: "This quote can't be rejected right now." };
+
+  const admin = createSupabaseServerClient();
+  // Gate is closed once a carrier is awarded.
+  if (await shipmentHasAward(admin, shipmentId)) {
+    return { ok: false, error: "A carrier is already awarded for this shipment." };
+  }
+  const { data: claimed } = await admin
+    .from("freight_quotes")
+    .update({ decision: "rejected", decided_at: new Date().toISOString() })
+    .eq("id", quoteId)
+    .eq("shipment_id", shipmentId)
+    .or("decision.is.null,decision.eq.negotiate")
+    .select("id");
+  if (!claimed || claimed.length === 0) return { ok: false, error: "This quote can't be rejected right now." };
+
+  await admin.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "freight_quote_rejected", quote_id: quoteId, decided_by: "customer", via: "portal" },
+  });
+  revalidatePath(`/portal/${token}/${shipmentId}`);
+  return { ok: true };
+}
+
+export async function portalNegotiateFreight(token: string, shipmentId: string, quoteId: string): Promise<Result> {
+  if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const auth = await authorizeFreightQuote(token, shipmentId, quoteId);
+  if (!auth) return { ok: false, error: "This quote can't be negotiated right now." };
+
+  const admin = createSupabaseServerClient();
+  // Gate is closed once a carrier is awarded.
+  if (await shipmentHasAward(admin, shipmentId)) {
+    return { ok: false, error: "A carrier is already awarded for this shipment." };
+  }
+  const target = negotiateTargetFor(auth.rateAmount);
+  const { data: claimed } = await admin
+    .from("freight_quotes")
+    .update({ decision: "negotiate", negotiate_target: target, decided_at: new Date().toISOString() })
+    .eq("id", quoteId)
+    .eq("shipment_id", shipmentId)
+    .or("decision.is.null,decision.eq.negotiate")
+    .select("id");
+  if (!claimed || claimed.length === 0) return { ok: false, error: "This quote can't be negotiated right now." };
+
+  await admin.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "freight_negotiate", quote_id: quoteId, target, decided_by: "customer", via: "portal" },
+  });
+  revalidatePath(`/portal/${token}/${shipmentId}`);
+  return { ok: true };
+}
 
 export async function portalCloseShipment(token: string, shipmentId: string): Promise<Result> {
   if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };

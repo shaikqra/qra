@@ -1,9 +1,8 @@
 // Deterministic, explainable ranking of carrier quotes — NO fabricated
-// "reliability" scores. Quotes with a numeric rate are ranked: lowest rate first,
-// then shorter transit, then more free days. Quotes without a rate sink below the
-// rated ones. If rated quotes are in different currencies, we flag it — we never
-// invent an FX conversion. The ranking is a recommendation; the exporter decides
-// at G4.
+// "reliability" scores, no invented FX. Live quotes (open or being negotiated)
+// are ranked: lowest rate first, then shorter transit, then more free days.
+// Rejected quotes drop out; an awarded quote closes the gate. The recommendation
+// is a proposal — the exporter decides at G4.
 
 export type FreightQuote = {
   id: string;
@@ -14,19 +13,25 @@ export type FreightQuote = {
   freeDays: number | null;
   surcharges: string;
   validity: string;
+  decision: string; // "" | "awarded" | "rejected" | "negotiate"
+  negotiateTarget: number | null;
 };
 
 export type RankedQuote = FreightQuote & { rank: number };
 
 export type RankedQuotes = {
-  ranked: RankedQuote[];
-  recommendationId: string | null;
+  ranked: RankedQuote[]; // live quotes (open/negotiate), ranked
+  awarded: FreightQuote | null; // the awarded carrier, if the gate is decided
+  recommendationId: string | null; // best live quote (null once awarded)
   reason: string;
 };
 
 export function rankFreightQuotes(quotes: FreightQuote[]): RankedQuotes {
-  const rated = quotes.filter((q) => q.rateAmount !== null);
-  const unrated = quotes.filter((q) => q.rateAmount === null);
+  const awarded = quotes.find((q) => q.decision === "awarded") ?? null;
+  const live = quotes.filter((q) => q.decision !== "awarded" && q.decision !== "rejected");
+
+  const rated = live.filter((q) => q.rateAmount !== null);
+  const unrated = live.filter((q) => q.rateAmount === null);
 
   rated.sort((a, b) => {
     if (a.rateAmount! !== b.rateAmount!) return a.rateAmount! - b.rateAmount!;
@@ -37,10 +42,13 @@ export function rankFreightQuotes(quotes: FreightQuote[]): RankedQuotes {
   });
 
   const ranked: RankedQuote[] = [...rated, ...unrated].map((q, i) => ({ ...q, rank: i + 1 }));
-  const top = rated[0] ?? null;
+  const top = awarded ? null : rated[0] ?? null;
 
   let reason = "";
-  if (top) {
+  if (awarded) {
+    const rate = [awarded.rateCurrency, awarded.rateAmount].filter((v) => v !== "" && v !== null).join(" ");
+    reason = `Freight awarded: ${awarded.carrierName || "this carrier"}${rate ? ` (${rate})` : ""}.`;
+  } else if (top) {
     const currencies = new Set(rated.map((q) => q.rateCurrency).filter(Boolean));
     const mixed = currencies.size > 1;
     const rate = [top.rateCurrency, top.rateAmount].filter((v) => v !== "" && v !== null).join(" ");
@@ -48,9 +56,16 @@ export function rankFreightQuotes(quotes: FreightQuote[]): RankedQuotes {
     reason =
       `Recommended: ${top.carrierName || "this carrier"} — lowest rate (${rate})${transit}.` +
       (mixed ? " Note: quotes are in different currencies — compare carefully (no FX applied)." : "");
-  } else if (quotes.length > 0) {
+  } else if (live.length > 0) {
     reason = "No quote has a numeric rate yet — can't rank. Add the carriers' rates.";
   }
 
-  return { ranked, recommendationId: top?.id ?? null, reason };
+  return { ranked, awarded, recommendationId: top?.id ?? null, reason };
+}
+
+// The counter target when the exporter chooses to negotiate: ~1.5% below the
+// quoted rate (the Build Bible's x0.985 step), rounded. null if no numeric rate.
+export function negotiateTargetFor(rate: number | null): number | null {
+  if (rate === null) return null;
+  return Math.round(rate * 0.985);
 }

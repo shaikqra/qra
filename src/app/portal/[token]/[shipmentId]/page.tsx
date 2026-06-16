@@ -8,8 +8,10 @@ import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { verifyFieldLines, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { isExporterVisibleDoc } from "@/lib/docs/doc-visibility";
 import { toActivities } from "@/lib/shipment-activity";
+import { loadRankedFreight } from "@/lib/freight/load";
 import { Timeline } from "../timeline";
 import { GateActions } from "./gate-actions";
+import { FreightGate } from "./freight-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -109,6 +111,9 @@ export default async function PortalShipment({
 
   const hint = portalActionHint(ship.status);
 
+  // Freight quotes for the G4 gate (shipment already verified as this customer's).
+  const rankedFreight = await loadRankedFreight(admin, shipmentId);
+
   // Verify gate (G1): the exact fields Qra wasn't sure about, surfaced for the
   // exporter to confirm or correct. Same computation as the WhatsApp message.
   let verifyLines: string[] = [];
@@ -167,6 +172,15 @@ export default async function PortalShipment({
           <Detail k="Port of discharge" v={f(ed, "port_of_discharge")} />
         </div>
       </section>
+
+      <FreightGate
+        token={token}
+        shipmentId={shipmentId}
+        quotes={rankedFreight.ranked}
+        awarded={rankedFreight.awarded}
+        recommendationId={rankedFreight.recommendationId}
+        reason={rankedFreight.reason}
+      />
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Documents</h2>

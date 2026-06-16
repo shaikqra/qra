@@ -73,6 +73,10 @@ function noteActivity(
       return { icon: "🚢", text: "Sent a freight quote-request to a carrier", tone: "text-blue-700" };
     case "freight_quote_added":
       return { icon: "💬", text: "Added a carrier's freight quote", tone: "text-blue-700" };
+    case "freight_quote_rejected":
+      return { icon: "🚫", text: "Rejected a carrier quote", tone: "text-zinc-600", actor: "Customer" };
+    case "freight_negotiate":
+      return { icon: "💱", text: "Asked to negotiate a carrier rate", tone: "text-amber-700", actor: "Customer" };
     case "value_amount_computed_and_confirmed":
       return { icon: "🧮", text: "Calculated the invoice value and the customer confirmed it", tone: "text-zinc-700" };
     case "customer_notify_failed":
@@ -119,6 +123,8 @@ export function toActivities(rows: AuditRow[]): Activity[] {
         out.push({ ...base, actor: "Customer", icon: "✅", text: "Order confirmed", tone: "text-green-700" });
       } else if (ev === "order_verified") {
         out.push({ ...base, actor: "Customer", icon: "✅", text: "Confirmed the order details", tone: "text-green-700" });
+      } else if (ev === "freight_awarded") {
+        out.push({ ...base, actor: "Customer", icon: "🚢", text: "Awarded a freight carrier", tone: "text-green-700" });
       } else {
         out.push({
           ...base,
