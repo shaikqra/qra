@@ -95,7 +95,21 @@ export async function runAutoPipeline(args: {
   try {
     await setStatus("data_extracting");
 
-    const { fields, confidence } = await args.extract();
+    // Extraction can hit a transient API hiccup (overload/timeout). Retry once
+    // before giving up — a momentary blip shouldn't bounce a real PO. A second
+    // failure falls through to the outer catch, which routes it to a human.
+    let extracted: { fields: PoFields; confidence: PoConfidence };
+    try {
+      extracted = await args.extract();
+    } catch (firstErr) {
+      console.warn("extract_retry", {
+        shipmentId: args.shipmentId,
+        name: firstErr instanceof Error ? firstErr.name : "unknown",
+      });
+      await new Promise((r) => setTimeout(r, 800));
+      extracted = await args.extract();
+    }
+    const { fields, confidence } = extracted;
 
     // Merge non-empty extracted values over whatever already exists.
     const { data: ship } = await admin
@@ -381,10 +395,33 @@ export async function runAutoPipeline(args: {
       name: e instanceof Error ? e.name : "unknown",
       message: e instanceof Error ? e.message : "unknown",
     });
+    // A PO must NEVER fail silently. Surface it to the operator's review queue
+    // (visible + actionable), record the failure for them (error type only — no
+    // PII), and reassure the exporter so they're not left in the dark. A PO Qra
+    // can't process degrades to a human; it does not vanish at "Order received".
     try {
-      await setStatus("po_received");
+      await setStatus("bucket_b_review");
+      await admin.from("audit_operator_action").insert({
+        operator_id: null,
+        shipment_id: args.shipmentId,
+        action_type: "note",
+        old_value: null,
+        new_value: { event: "auto_pipeline_error", error_type: e instanceof Error ? e.name : "unknown" },
+      });
+      const { data: shipRow } = await admin
+        .from("shipments")
+        .select("customer_id, reference_number")
+        .eq("id", args.shipmentId)
+        .maybeSingle();
+      if (shipRow) {
+        await notifyCustomerWhatsApp(
+          admin,
+          shipRow.customer_id as string,
+          `📩 I've received your PO (ref ${shipRow.reference_number}). It needs a quick manual check from our team — we'll be in touch shortly. Nothing you need to do right now.`
+        );
+      }
     } catch {
-      // best effort
+      // Even the fallback failed — the error log above is the durable record.
     }
   }
 }

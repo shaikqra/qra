@@ -67,6 +67,8 @@ function noteActivity(
       return { icon: "⚠️", text: "Couldn't complete sanctions screening — held to be safe", tone: "text-orange-700" };
     case "trust_gate_flagged":
       return { icon: "👀", text: "Some details needed checking — flagged for your review", tone: "text-indigo-700" };
+    case "auto_pipeline_error":
+      return { icon: "🛠️", text: "Couldn't read this PO automatically — our team is reviewing it", tone: "text-indigo-700" };
     case "customer_verify_requested":
       return { icon: "📋", text: "Asked the customer to confirm a few details", tone: "text-amber-700" };
     case "freight_rfq_sent":
