@@ -276,6 +276,29 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Stat callout — the verified pain */}
+      <section className="bg-zinc-900 text-white">
+        <div className="max-w-6xl mx-auto px-6 py-16 grid gap-8 sm:grid-cols-[auto_1fr] items-center">
+          <div className="text-6xl sm:text-7xl font-bold tracking-tight text-emerald-400 tabular-nums">
+            ~70%
+          </div>
+          <div>
+            <p className="text-xl font-semibold leading-snug">
+              of letter-of-credit document sets are rejected on first presentation.
+            </p>
+            <p className="mt-3 text-sm text-zinc-300 leading-relaxed max-w-2xl">
+              Usually for small discrepancies — a detail that doesn&apos;t match across the invoice,
+              packing list and transport documents. Each rejection means a bank fee and a wait to get
+              paid. Qra builds every document from one checked source, so they agree — cutting the
+              discrepancies that send a set back.
+            </p>
+            <p className="mt-2 text-xs text-zinc-500">
+              Source: ICC Banking Commission / trade-finance data.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* How it works */}
       <section id="how" className="max-w-6xl mx-auto px-6 py-20">
         <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
