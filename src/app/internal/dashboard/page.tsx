@@ -169,7 +169,7 @@ export default async function DashboardPage() {
             label="Typical turnaround"
             value={medianTurnaround !== null ? fmtDuration(medianTurnaround) : "—"}
             sub="PO → documents"
-            slo={medianTurnaround !== null ? "vs 10–15 hrs manual" : undefined}
+            slo={medianTurnaround !== null ? "vs hours of manual work" : undefined}
           />
           <Kpi label="Exporters" value={String(customerCount ?? 0)} sub="on WhatsApp" />
         </div>

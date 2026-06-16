@@ -178,7 +178,7 @@ export default async function ShipmentDetailPage({
             </span>
           </div>
           <p className="mt-1 text-xs text-emerald-700/80">
-            Typical manual process: 10–15 hours per shipment.
+            Typical manual process: hours of manual work per shipment.
           </p>
         </div>
       )}

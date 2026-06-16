@@ -256,10 +256,10 @@ export default function Home() {
               Documentation today
             </div>
             <ul className="mt-3 space-y-2 text-sm text-zinc-600">
-              <li>• 10–15 hours of typing, checking and chasing per shipment</li>
-              <li>• Details retyped across invoice, packing list and certificates</li>
+              <li>• Hours of skilled staff time, retyping the same details by hand</li>
+              <li>• The same details keyed across invoice, packing list and certificates</li>
               <li>• Sanctions checks done rarely, manually, or not at all</li>
-              <li>• One typo discovered at the bank or at customs</li>
+              <li>• One typo caught late — discrepancy fees at the bank, demurrage at the port</li>
             </ul>
           </div>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
