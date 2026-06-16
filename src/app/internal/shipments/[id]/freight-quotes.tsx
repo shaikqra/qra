@@ -2,8 +2,87 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { addFreightQuoteAction } from "./freight-actions";
+import { addFreightQuoteAction, draftCounterAction, sendFreightRfqAction } from "./freight-actions";
 import type { RankedQuote, FreightQuote } from "@/lib/freight/rank-quotes";
+
+// Counter-offer to a carrier whose quote the exporter chose to negotiate. The
+// agent drafts it at the x0.985 target; the operator reviews and sends it (the
+// same audited send path as the RFQ).
+function CounterOffer({ shipmentId, quote }: { shipmentId: string; quote: RankedQuote }) {
+  const [pending, start] = useTransition();
+  const [draft, setDraft] = useState<{ subject: string; body: string } | null>(null);
+  const [carrier, setCarrier] = useState("");
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function draftIt() {
+    setError(null);
+    setSent(false);
+    start(async () => {
+      const r = await draftCounterAction(shipmentId, quote.id);
+      if (r.ok) setDraft(r.draft);
+      else setError(r.error);
+    });
+  }
+
+  function send() {
+    if (!draft) return;
+    setError(null);
+    start(async () => {
+      const r = await sendFreightRfqAction(shipmentId, carrier, draft.subject, draft.body);
+      if (r.ok) {
+        setSent(true);
+        if (r.warning) setError(r.warning);
+      } else setError(r.error);
+    });
+  }
+
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+      <div className="text-[11px] font-semibold text-amber-900">
+        Counter-offer to {quote.carrierName || "carrier"}
+        {quote.negotiateTarget !== null ? ` → target ${quote.rateCurrency} ${quote.negotiateTarget}` : ""}
+      </div>
+      {!draft ? (
+        <button
+          onClick={draftIt}
+          disabled={pending}
+          className="mt-2 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+        >
+          {pending ? "Drafting…" : "Draft counter-offer"}
+        </button>
+      ) : (
+        <div className="mt-2 rounded-md border border-amber-200 bg-white p-2.5">
+          <div className="text-[11px] font-semibold text-zinc-700">Subject: {draft.subject}</div>
+          <pre className="mt-1 whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-zinc-700">
+            {draft.body}
+          </pre>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              type="email"
+              value={carrier}
+              onChange={(e) => {
+                setCarrier(e.target.value);
+                setSent(false);
+              }}
+              placeholder="carrier@example.com"
+              className="flex-1 min-w-[160px] rounded-md border border-zinc-300 px-2 py-1 text-[11px] focus:outline-none focus:ring-2 focus:ring-zinc-900"
+            />
+            <button
+              onClick={send}
+              disabled={pending || !carrier.trim()}
+              className="rounded-md bg-zinc-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {pending ? "Sending…" : "Send counter"}
+            </button>
+            {sent && <span className="text-[11px] font-semibold text-emerald-700">Sent ✓</span>}
+          </div>
+        </div>
+      )}
+      {error && <div className="mt-1 text-[11px] text-red-600">{error}</div>}
+    </div>
+  );
+}
 
 // Carrier quotes + ranking. Operator pastes a carrier reply; the Freight agent
 // parses it and the quotes are ranked. The Accept/Negotiate/Reject decision (G4)
@@ -94,6 +173,15 @@ export function FreightQuotes({
               </tbody>
             </table>
           </div>
+          {quotes.filter((q) => q.decision === "negotiate").length > 0 && (
+            <div className="mt-3 flex flex-col gap-2">
+              {quotes
+                .filter((q) => q.decision === "negotiate")
+                .map((q) => (
+                  <CounterOffer key={q.id} shipmentId={shipmentId} quote={q} />
+                ))}
+            </div>
+          )}
         </>
       )}
 

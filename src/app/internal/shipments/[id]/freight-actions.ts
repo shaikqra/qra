@@ -3,7 +3,7 @@
 import { createHash } from "crypto";
 import { getOperatorSession } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { draftFreightRfq, type FreightRfq } from "@/lib/ai/freight-agent";
+import { draftFreightRfq, draftCounterOffer, type FreightRfq } from "@/lib/ai/freight-agent";
 import { sendFreightRfqCore } from "@/lib/freight/send-rfq";
 import { parseFreightQuote } from "@/lib/ai/parse-freight-quote";
 
@@ -59,6 +59,44 @@ export async function draftFreightRfqAction(shipmentId: string): Promise<RfqResu
   });
   if (!rfq) return { ok: false, error: "Couldn't draft the RFQ — add a product description first." };
   return { ok: true, rfq };
+}
+
+// Draft a counter-offer to a carrier whose quote the exporter chose to negotiate.
+// Uses the negotiate target (x0.985) recorded at the G4 gate. Draft only; the
+// operator sends it via sendFreightRfqAction (the audited send path).
+export async function draftCounterAction(
+  shipmentId: string,
+  quoteId: string
+): Promise<{ ok: true; draft: FreightRfq } | { ok: false; error: string }> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  if (rateLimited(`counter:${session.userId}`)) return { ok: false, error: "Please wait a moment and try again." };
+
+  const admin = createSupabaseServerClient();
+  const { data: q } = await admin
+    .from("freight_quotes")
+    .select("carrier_name, rate_amount, rate_currency, negotiate_target, decision")
+    .eq("id", quoteId)
+    .eq("shipment_id", shipmentId)
+    .maybeSingle();
+  if (!q) return { ok: false, error: "Quote not found." };
+  if (q.decision !== "negotiate") return { ok: false, error: "This quote isn't being negotiated." };
+
+  const { data: ship } = await admin
+    .from("shipments")
+    .select("reference_number")
+    .eq("id", shipmentId)
+    .maybeSingle();
+
+  const cur = ((q.rate_currency as string) ?? "").trim();
+  const draft = await draftCounterOffer({
+    reference: (ship?.reference_number as string) ?? "",
+    carrierName: ((q.carrier_name as string) ?? "").trim(),
+    currentRate: q.rate_amount != null ? `${cur} ${q.rate_amount}`.trim() : "",
+    targetRate: q.negotiate_target != null ? `${cur} ${q.negotiate_target}`.trim() : "",
+  });
+  if (!draft) return { ok: false, error: "Couldn't draft the counter — try again." };
+  return { ok: true, draft };
 }
 
 // Send a drafted RFQ to a carrier email. Operator reviews the draft, enters the
