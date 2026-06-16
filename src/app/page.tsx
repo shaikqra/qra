@@ -191,6 +191,9 @@ export default function Home() {
             <a href="#faq" className="text-zinc-600 hover:text-zinc-900 hidden sm:inline">
               FAQ
             </a>
+            <Link href="/cha/login" className="text-zinc-600 hover:text-zinc-900">
+              CHA login
+            </Link>
             <a
               href={WHATSAPP_LINK}
               target="_blank"
