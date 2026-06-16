@@ -12,6 +12,7 @@ import { FreightQuotes } from "./freight-quotes";
 import { CertPanel } from "./cert-panel";
 import { LcPanel } from "./lc-panel";
 import { TrackingPanel } from "./tracking-panel";
+import { LogisticsPanel } from "./logistics-panel";
 import { loadRankedFreight } from "@/lib/freight/load";
 import { toActivities } from "@/lib/shipment-activity";
 
@@ -288,6 +289,13 @@ export default async function ShipmentDetailPage({
           recommendationId={rankedFreight.recommendationId}
           reason={rankedFreight.reason}
         />
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
+          Logistics
+        </h2>
+        <LogisticsPanel shipmentId={ship.id} />
       </section>
 
       <section>
