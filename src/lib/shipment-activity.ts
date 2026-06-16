@@ -69,6 +69,8 @@ function noteActivity(
       return { icon: "👀", text: "Some details needed checking — flagged for your review", tone: "text-indigo-700" };
     case "customer_verify_requested":
       return { icon: "📋", text: "Asked the customer to confirm a few details", tone: "text-amber-700" };
+    case "freight_rfq_sent":
+      return { icon: "🚢", text: "Sent a freight quote-request to a carrier", tone: "text-blue-700" };
     case "value_amount_computed_and_confirmed":
       return { icon: "🧮", text: "Calculated the invoice value and the customer confirmed it", tone: "text-zinc-700" };
     case "customer_notify_failed":

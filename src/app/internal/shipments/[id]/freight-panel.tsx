@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { draftFreightRfqAction } from "./freight-actions";
+import { draftFreightRfqAction, sendFreightRfqAction } from "./freight-actions";
 
 // Freight agent (G4) — first capability: draft a carrier RFQ from the shipment.
 // The operator reviews it and emails it to their carriers. Send → parse quote
@@ -11,14 +11,29 @@ export function FreightPanel({ shipmentId }: { shipmentId: string }) {
   const [rfq, setRfq] = useState<{ subject: string; body: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [carrier, setCarrier] = useState("");
+  const [sent, setSent] = useState(false);
 
   function run() {
     setError(null);
     setCopied(false);
+    setSent(false);
     start(async () => {
       const r = await draftFreightRfqAction(shipmentId);
       if (r.ok) setRfq(r.rfq);
       else setError(r.error);
+    });
+  }
+
+  function send() {
+    if (!rfq) return;
+    setError(null);
+    start(async () => {
+      const r = await sendFreightRfqAction(shipmentId, carrier, rfq.subject, rfq.body);
+      if (r.ok) {
+        setSent(true);
+        if (r.warning) setError(r.warning);
+      } else setError(r.error);
     });
   }
 
@@ -62,6 +77,26 @@ export function FreightPanel({ shipmentId }: { shipmentId: string }) {
           <pre className="mt-2 whitespace-pre-wrap font-sans text-xs leading-relaxed text-zinc-700">
             {rfq.body}
           </pre>
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-3">
+            <input
+              type="email"
+              value={carrier}
+              onChange={(e) => {
+                setCarrier(e.target.value);
+                setSent(false);
+              }}
+              placeholder="carrier@example.com"
+              className="flex-1 min-w-[180px] rounded-md border border-zinc-300 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-900"
+            />
+            <button
+              onClick={send}
+              disabled={pending || !carrier.trim()}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {pending ? "Sending…" : "Send RFQ"}
+            </button>
+            {sent && <span className="text-xs font-semibold text-emerald-700">Sent ✓</span>}
+          </div>
         </div>
       )}
     </div>
