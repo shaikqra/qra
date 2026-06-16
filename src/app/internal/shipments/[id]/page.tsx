@@ -9,6 +9,7 @@ import { AiCorrect } from "./ai-correct";
 import { VerifyChain } from "./verify-chain";
 import { FreightPanel } from "./freight-panel";
 import { FreightQuotes } from "./freight-quotes";
+import { CertPanel } from "./cert-panel";
 import { loadRankedFreight } from "@/lib/freight/load";
 import { toActivities } from "@/lib/shipment-activity";
 
@@ -285,6 +286,13 @@ export default async function ShipmentDetailPage({
           recommendationId={rankedFreight.recommendationId}
           reason={rankedFreight.reason}
         />
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
+          Certification
+        </h2>
+        <CertPanel shipmentId={ship.id} />
       </section>
 
       <section>
