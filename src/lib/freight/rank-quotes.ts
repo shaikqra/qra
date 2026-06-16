@@ -24,6 +24,10 @@ export type RankedQuotes = {
   awarded: FreightQuote | null; // the awarded carrier, if the gate is decided
   recommendationId: string | null; // best live quote (null once awarded)
   reason: string;
+  // Build Bible "freight-saved figure": what the exporter avoided by taking the
+  // awarded rate vs the highest quote received (same currency). null until awarded
+  // or when there's nothing to compare against.
+  saved: { amount: number; currency: string; baseline: number } | null;
 };
 
 export function rankFreightQuotes(quotes: FreightQuote[]): RankedQuotes {
@@ -56,11 +60,35 @@ export function rankFreightQuotes(quotes: FreightQuote[]): RankedQuotes {
     reason =
       `Recommended: ${top.carrierName || "this carrier"} — lowest rate (${rate})${transit}.` +
       (mixed ? " Note: quotes are in different currencies — compare carefully (no FX applied)." : "");
+    // After a rejection, the Bible swaps to the next-best line and re-quotes at
+    // ×1.03 — surface that target to negotiate the next-best toward.
+    const rejectedRated = quotes.filter((q) => q.decision === "rejected" && q.rateAmount !== null);
+    if (rejectedRated.length > 0) {
+      const last = rejectedRated[rejectedRated.length - 1];
+      const target = rejectRequoteTargetFor(last.rateAmount);
+      reason += ` Next-best after a rejection — aim to negotiate toward ${last.rateCurrency} ${target} (~3% over the rejected rate).`;
+    }
   } else if (live.length > 0) {
     reason = "No quote has a numeric rate yet — can't rank. Add the carriers' rates.";
   }
 
-  return { ranked, awarded, recommendationId: top?.id ?? null, reason };
+  // Freight-saved figure: highest quote received in the awarded currency minus the
+  // awarded rate. Honest v1 proxy for the Bible's market-rate benchmark; only shown
+  // when there were at least two comparable quotes and the saving is positive.
+  let saved: RankedQuotes["saved"] = null;
+  if (awarded && awarded.rateAmount !== null) {
+    const sameCcy = quotes.filter((q) => q.rateAmount !== null && q.rateCurrency === awarded.rateCurrency);
+    if (sameCcy.length >= 2) {
+      const baseline = Math.max(...sameCcy.map((q) => q.rateAmount!));
+      const amount = baseline - awarded.rateAmount;
+      if (amount > 0) {
+        saved = { amount, currency: awarded.rateCurrency, baseline };
+        reason += ` Qra saved ${awarded.rateCurrency} ${amount} vs the highest quote (${awarded.rateCurrency} ${baseline}).`;
+      }
+    }
+  }
+
+  return { ranked, awarded, recommendationId: top?.id ?? null, reason, saved };
 }
 
 // The counter target when the exporter chooses to negotiate: ~1.5% below the
@@ -68,4 +96,12 @@ export function rankFreightQuotes(quotes: FreightQuote[]): RankedQuotes {
 export function negotiateTargetFor(rate: number | null): number | null {
   if (rate === null) return null;
   return Math.round(rate * 0.985);
+}
+
+// When the exporter REJECTS a carrier, the Build Bible swaps to the next-best line
+// and re-quotes at ×1.03 (the next line is typically a few % dearer) — the rate to
+// aim the next-best negotiation toward, off the rejected rate. null if no rate.
+export function rejectRequoteTargetFor(rate: number | null): number | null {
+  if (rate === null) return null;
+  return Math.round(rate * 1.03);
 }
