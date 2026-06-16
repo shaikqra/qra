@@ -8,6 +8,8 @@ import { InvoicePanel } from "./invoice-panel";
 import { AiCorrect } from "./ai-correct";
 import { VerifyChain } from "./verify-chain";
 import { FreightPanel } from "./freight-panel";
+import { FreightQuotes } from "./freight-quotes";
+import { rankFreightQuotes } from "@/lib/freight/rank-quotes";
 import { toActivities } from "@/lib/shipment-activity";
 
 type Shipment = {
@@ -144,6 +146,36 @@ export default async function ShipmentDetailPage({
       : null;
   const qraElapsedMs = elapsed !== null && elapsed < MAX_SHOWABLE_MS ? elapsed : null;
 
+  // Freight quotes (service-role read — freight_quotes is RLS default-deny).
+  const { data: freightRows } = await admin
+    .from("freight_quotes")
+    .select("id, carrier_name, rate_amount, rate_currency, transit_days, free_days, surcharges, validity")
+    .eq("shipment_id", id)
+    .order("created_at", { ascending: true });
+  const rankedFreight = rankFreightQuotes(
+    (
+      (freightRows ?? []) as Array<{
+        id: string;
+        carrier_name: string | null;
+        rate_amount: number | string | null;
+        rate_currency: string | null;
+        transit_days: number | null;
+        free_days: number | null;
+        surcharges: string | null;
+        validity: string | null;
+      }>
+    ).map((r) => ({
+      id: r.id,
+      carrierName: r.carrier_name ?? "",
+      rateAmount: r.rate_amount == null ? null : Number(r.rate_amount),
+      rateCurrency: r.rate_currency ?? "",
+      transitDays: r.transit_days,
+      freeDays: r.free_days,
+      surcharges: r.surcharges ?? "",
+      validity: r.validity ?? "",
+    }))
+  );
+
   return (
     <div className="flex flex-col gap-8">
       <div className="flex items-center justify-between">
@@ -273,6 +305,12 @@ export default async function ShipmentDetailPage({
           Freight
         </h2>
         <FreightPanel shipmentId={ship.id} />
+        <FreightQuotes
+          shipmentId={ship.id}
+          quotes={rankedFreight.ranked}
+          recommendationId={rankedFreight.recommendationId}
+          reason={rankedFreight.reason}
+        />
       </section>
 
       <section>

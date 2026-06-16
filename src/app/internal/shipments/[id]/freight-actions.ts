@@ -1,9 +1,11 @@
 "use server";
 
+import { createHash } from "crypto";
 import { getOperatorSession } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { draftFreightRfq, type FreightRfq } from "@/lib/ai/freight-agent";
 import { sendFreightRfqCore } from "@/lib/freight/send-rfq";
+import { parseFreightQuote } from "@/lib/ai/parse-freight-quote";
 
 type RfqResult = { ok: true; rfq: FreightRfq } | { ok: false; error: string };
 
@@ -75,5 +77,56 @@ export async function sendFreightRfqAction(
   const r = await sendFreightRfqCore(shipmentId, session.userId, carrierEmail, subject, body);
   if (!r.ok) return { ok: false, error: r.error };
   if (!r.audited) return { ok: true, warning: "Email sent, but logging it failed — please flag this." };
+  return { ok: true };
+}
+
+// Parse a carrier's quote reply into a structured quote and store it. The agent
+// extracts only what the carrier stated (never invents a rate); the operator
+// pastes the reply for now (auto-inbound is a later build).
+export async function addFreightQuoteAction(
+  shipmentId: string,
+  rawText: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  if (rateLimited(`rfqparse:${session.userId}`)) return { ok: false, error: "Please wait a moment and try again." };
+  if (!rawText.trim()) return { ok: false, error: "Paste the carrier's reply first." };
+
+  const parsed = await parseFreightQuote(rawText);
+  if (!parsed) return { ok: false, error: "Couldn't read a quote from that reply." };
+
+  const admin = createSupabaseServerClient();
+  const { data: ship } = await admin.from("shipments").select("id").eq("id", shipmentId).maybeSingle();
+  if (!ship) return { ok: false, error: "Shipment not found." };
+
+  const { error } = await admin.from("freight_quotes").insert({
+    shipment_id: shipmentId,
+    carrier_name: parsed.carrierName || null,
+    rate_amount: parsed.rateAmount,
+    rate_currency: parsed.rateCurrency || null,
+    transit_days: parsed.transitDays,
+    free_days: parsed.freeDays,
+    surcharges: parsed.surcharges || null,
+    validity: parsed.validity || null,
+    raw_text: rawText.slice(0, 4000),
+    created_by: session.userId,
+  });
+  if (error) {
+    console.error("freight_quote_insert_failed", { shipmentId });
+    return { ok: false, error: "Couldn't save the quote — try again." };
+  }
+
+  // Audit the quote-add — it feeds the G4 carrier (money) decision, so it leaves a
+  // human-readable trace: who added it, which carrier, a hash of the raw reply.
+  const rawHash = createHash("sha256").update(rawText.slice(0, 4000)).digest("hex");
+  const { error: auditErr } = await admin.from("audit_operator_action").insert({
+    operator_id: session.userId,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "freight_quote_added", carrier_name: parsed.carrierName || null, raw_sha256: rawHash },
+  });
+  if (auditErr) console.error("freight_quote_audit_write_failed", { shipmentId });
+
   return { ok: true };
 }
