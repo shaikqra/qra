@@ -4,6 +4,7 @@ import { buildCommercialInvoicePdf } from "@/lib/pdf/commercial-invoice";
 import { buildPackingListPdf } from "@/lib/pdf/packing-list";
 import { buildCertificateOfOriginPdf } from "@/lib/pdf/certificate-of-origin";
 import { buildShippingBillPackPdf } from "@/lib/pdf/shipping-bill-pack";
+import { isEuDestination } from "@/lib/docs/destinations";
 
 // Shared document-generation engine. Called by the dashboard buttons
 // (generatedBy = operator id) and by the WhatsApp auto-pipeline
@@ -183,7 +184,12 @@ async function generateInvoiceVariantCore(
     declarations: {
       lut: prof("declaration_lut") || undefined,
       rodtep: prof("declaration_rodtep") || undefined,
-      origin: prof("declaration_origin") || undefined,
+      // The Statement on Origin is the EU GSP/REX self-certification — only valid
+      // for EU destinations. Omit it on non-EU shipments (e.g. USA) so a wrong
+      // origin claim never lands on the invoice.
+      origin: isEuDestination(get("destination_country"))
+        ? prof("declaration_origin") || undefined
+        : undefined,
     },
   });
 
