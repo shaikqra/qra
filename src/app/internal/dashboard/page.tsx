@@ -13,7 +13,9 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // today; partial = a first version runs; planned = not built yet.
 const AGENTS: { n: string; role: string; tier: "A" | "B" | "C"; status: "live" | "partial" | "planned" }[] = [
   { n: "Indu", role: "Intake", tier: "B", status: "live" },
-  { n: "Cyrus", role: "Compliance", tier: "B", status: "planned" },
+  // Sanctions screening (US/UN/EU) is live + blocking; HS classify is advisory;
+  // destination-rule checking is not built — so "partial", not "planned".
+  { n: "Cyrus", role: "Compliance", tier: "B", status: "partial" },
   { n: "Faiz", role: "Freight", tier: "A", status: "planned" },
   { n: "Lyle", role: "Logistics", tier: "B", status: "planned" },
   { n: "Citra", role: "Certification", tier: "B", status: "planned" },
@@ -36,7 +38,9 @@ const STATUS_LABEL: Record<string, string> = { live: "Live", partial: "Partial",
 const FUNNEL: { status: string; label: string; bar: string }[] = [
   { status: "po_received", label: "PO received", bar: "bg-amber-400" },
   { status: "data_extracting", label: "Reading PO", bar: "bg-sky-400" },
+  { status: "awaiting_order_confirm", label: "Confirm order", bar: "bg-purple-400" },
   { status: "awaiting_customer_info", label: "Awaiting info", bar: "bg-yellow-400" },
+  { status: "awaiting_customer_verify", label: "Verify details", bar: "bg-amber-500" },
   { status: "sanctions_screening", label: "Sanctions review", bar: "bg-orange-400" },
   { status: "generating_documents", label: "Generating docs", bar: "bg-violet-400" },
   { status: "bucket_b_review", label: "Your review", bar: "bg-indigo-400" },

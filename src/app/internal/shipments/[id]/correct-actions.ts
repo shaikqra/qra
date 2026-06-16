@@ -80,46 +80,9 @@ export async function checkHsCode(shipmentId: string): Promise<HsCheckResult> {
   return { ok: true, result };
 }
 
-// G8 (operator side) — close a filed shipment from the dashboard.
-const OPERATOR_CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered"];
-
-export async function operatorCloseShipment(shipmentId: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const session = await getOperatorSession();
-  if (!session) return { ok: false, error: "Not authorized" };
-  const admin = createSupabaseServerClient();
-  const { data: ship } = await admin
-    .from("shipments")
-    .select("status")
-    .eq("id", shipmentId)
-    .maybeSingle();
-  const prevStatus = ship?.status as string | undefined;
-  if (!prevStatus || !OPERATOR_CLOSEABLE.includes(prevStatus)) {
-    return { ok: false, error: "This shipment can only be closed once it's filed with the CHA." };
-  }
-
-  // Atomic claim guarded on the exact prior status (race-safe).
-  const { data: claimed } = await admin
-    .from("shipments")
-    .update({ status: "completed" })
-    .eq("id", shipmentId)
-    .eq("status", prevStatus)
-    .select("id");
-  if (!claimed || claimed.length === 0) {
-    return { ok: false, error: "This shipment can't be closed — it may have moved on." };
-  }
-
-  const { error: auditErr } = await admin.from("audit_operator_action").insert({
-    operator_id: session.userId,
-    shipment_id: shipmentId,
-    action_type: "status_change",
-    old_value: { status: prevStatus },
-    new_value: { status: "completed", closed_by: "operator" },
-  });
-  if (auditErr) console.error("operator_close_audit_failed", { code: auditErr.code });
-
-  revalidatePath(`/internal/shipments/${shipmentId}`);
-  return { ok: true };
-}
+// G8 close is the EXPORTER's gate (Build Bible §4): it lives only in the exporter
+// console (portalCloseShipment). Mission Control / the operator owns no gates, so
+// there is deliberately NO operator-side close action here.
 
 // A change to any of these must re-run denied-party screening — a corrected
 // party name can't reach the documents without being checked.

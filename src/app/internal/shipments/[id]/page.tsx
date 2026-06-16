@@ -7,7 +7,6 @@ import { ExtractionForm } from "./extraction-form";
 import { InvoicePanel } from "./invoice-panel";
 import { AiCorrect } from "./ai-correct";
 import { VerifyChain } from "./verify-chain";
-import { CloseShipment } from "./close-shipment";
 import { toActivities } from "@/lib/shipment-activity";
 
 type Shipment = {
@@ -163,7 +162,6 @@ export default async function ShipmentDetailPage({
             {new Date(ship.created_at).toLocaleString()}
           </p>
         </div>
-        <CloseShipment shipmentId={ship.id} status={ship.status} />
       </div>
 
       {qraElapsedMs !== null && (
