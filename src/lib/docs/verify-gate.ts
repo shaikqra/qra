@@ -26,6 +26,12 @@ function label(field: string): string {
   return FIELD_LABELS[field] ?? field;
 }
 
+// Public field label — the exporter console uses it to title the correction
+// inputs in the verify pop-up, so they match the WhatsApp wording exactly.
+export function fieldLabel(field: string): string {
+  return label(field);
+}
+
 // Read the per-field extraction confidence we stash under the reserved key.
 export function readStoredConfidence(merged: Record<string, string>): Record<string, number> {
   try {

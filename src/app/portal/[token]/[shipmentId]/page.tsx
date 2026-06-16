@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalRateLimited } from "@/lib/portal/auth";
 import { portalActionHint, portalStageIndex } from "@/lib/portal/stages";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
-import { verifyFieldLines, readStoredConfidence } from "@/lib/docs/verify-gate";
+import { verifyFieldLines, readStoredConfidence, readDraftedFields, fieldLabel, flaggedFieldKeys } from "@/lib/docs/verify-gate";
 import { isExporterVisibleDoc } from "@/lib/docs/doc-visibility";
 import { toActivities } from "@/lib/shipment-activity";
 import { loadRankedFreight } from "@/lib/freight/load";
@@ -120,11 +120,19 @@ export default async function PortalShipment({
   // Verify gate (G1): the exact fields Qra wasn't sure about, surfaced for the
   // exporter to confirm or correct. Same computation as the WhatsApp message.
   let verifyLines: string[] = [];
+  let verifyFields: { key: string; label: string; value: string; drafted: boolean }[] = [];
   if (ship.status === "awaiting_customer_verify") {
     const ed2 = (ed ?? {}) as Record<string, string>;
     const issues = validateExtracted(ed2);
     const shaky = lowConfidenceFields(ed2, readStoredConfidence(ed2));
     verifyLines = verifyFieldLines(ed2, issues, shaky);
+    const drafted = new Set(readDraftedFields(ed2));
+    verifyFields = flaggedFieldKeys(issues, shaky).map((k) => ({
+      key: k,
+      label: fieldLabel(k),
+      value: (ed2[k] ?? "").trim(),
+      drafted: drafted.has(k),
+    }));
   }
 
   return (
@@ -138,24 +146,14 @@ export default async function PortalShipment({
         </h1>
       </div>
 
-      {ship.status === "awaiting_customer_verify" && verifyLines.length > 0 && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <div className="font-semibold">Please check these details</div>
-          <ul className="mt-2 space-y-1">
-            {verifyLines.map((l, i) => (
-              <li key={i}>{l.replace(/^•\s*/, "")}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <GateActions token={token} shipmentId={shipmentId} status={ship.status} />
-
-      {ship.status === "awaiting_customer_info" && hint && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          {hint}
-        </div>
-      )}
+      <GateActions
+        token={token}
+        shipmentId={shipmentId}
+        status={ship.status}
+        verifyLines={verifyLines}
+        verifyFields={verifyFields}
+        infoHint={ship.status === "awaiting_customer_info" ? hint : null}
+      />
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Progress</h2>

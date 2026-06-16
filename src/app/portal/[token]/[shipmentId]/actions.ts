@@ -7,11 +7,20 @@ import { resolveCustomerByPortalToken, portalWriteRateLimited } from "@/lib/port
 import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline";
 import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
 import { generateProformaInvoiceCore, generateCertificateOfOriginCore } from "@/lib/docs/generate";
+import { validateExtracted } from "@/lib/docs/validate";
+import { readDraftedFields, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
 import { negotiateTargetFor } from "@/lib/freight/rank-quotes";
 
 type Result = { ok: true } | { ok: false; error: string };
+
+// The fields the verify gate can flag — the only ones a console correction may
+// touch (a reply can't rewrite an arbitrary field). Mirrors FIELD_LABELS.
+const ALLOWED_VERIFY_FIELDS = new Set([
+  "buyer_name", "product_description", "quantity", "value_amount", "value_currency",
+  "incoterm", "hs_code", "number_of_packages", "package_type", "net_weight", "gross_weight",
+]);
 
 // Authorize a portal write: the token must resolve to a customer, AND that
 // shipment must belong to them AND be at the expected gate. Returns the
@@ -82,12 +91,62 @@ export async function portalConfirmOrder(token: string, shipmentId: string): Pro
 // this button is the "yes, they're right" path. Mirrors the WhatsApp CONFIRM with
 // an atomic claim so a double-tap (or a simultaneous WhatsApp confirm) can't
 // double-run.
-export async function portalVerifyOrder(token: string, shipmentId: string): Promise<Result> {
+export async function portalVerifyOrder(
+  token: string,
+  shipmentId: string,
+  corrections?: Record<string, string>
+): Promise<Result> {
   if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
   const auth = await authorize(token, shipmentId, "awaiting_customer_verify");
   if (!auth) return { ok: false, error: "This order can't be confirmed right now." };
 
   const admin = createSupabaseServerClient();
+
+  // Corrections typed in the console pop-up: apply only to fields the verify gate
+  // can flag, re-validate the format of each, and — since the exporter supplied
+  // them — drop the Qra-draft marker and lift their confidence before resuming.
+  if (corrections && Object.keys(corrections).length > 0) {
+    const { data: ship } = await admin
+      .from("shipments")
+      .select("extracted_data")
+      .eq("id", shipmentId)
+      .maybeSingle();
+    const original = (ship?.extracted_data ?? {}) as Record<string, string>;
+    const merged = { ...original };
+    const changed: string[] = [];
+    for (const [k, raw] of Object.entries(corrections)) {
+      // Allow-list + string guard: corrections is client JSON, so reject any
+      // unknown/reserved key and any non-string value before touching the data.
+      if (!ALLOWED_VERIFY_FIELDS.has(k) || typeof raw !== "string") continue;
+      const v = raw.trim();
+      if (v && v !== (original[k] ?? "").trim()) {
+        merged[k] = v;
+        changed.push(k);
+      }
+    }
+    if (changed.length > 0) {
+      // Reject any issue the correction INTRODUCED — matched by field+reason so a
+      // cross-field break (e.g. gross < net, which attaches to a field they didn't
+      // edit) can't slip past a "only validate the changed field" filter.
+      const sig = (i: { field: string; reason: string }) => `${i.field}:${i.reason}`;
+      const before = new Set(validateExtracted(original).map(sig));
+      const introduced = validateExtracted(merged).filter((i) => !before.has(sig(i)));
+      if (introduced.length > 0) return { ok: false, error: introduced.map((i) => i.reason).join("; ") };
+      merged["_drafted"] = JSON.stringify(readDraftedFields(merged).filter((f) => !changed.includes(f)));
+      const conf = readStoredConfidence(merged);
+      for (const k of changed) conf[k] = 0.99;
+      merged["_confidence"] = JSON.stringify(conf);
+      await admin.from("shipments").update({ extracted_data: merged }).eq("id", shipmentId);
+      await admin.from("audit_operator_action").insert({
+        operator_id: null,
+        shipment_id: shipmentId,
+        action_type: "extract",
+        old_value: null,
+        new_value: { event: "fields_corrected", via: "portal", fields: changed },
+      });
+    }
+  }
+
   const { data: claimed } = await admin
     .from("shipments")
     .update({ status: "data_extracting" })
