@@ -28,6 +28,7 @@ const DOC_LABELS: Record<string, string> = {
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
   shipping_bill_pack: "Shipping Bill Data Sheet",
+  export_declaration: "Export Declaration / Annexure",
 };
 
 // Email the latest generated document of each type to the exporter's customs

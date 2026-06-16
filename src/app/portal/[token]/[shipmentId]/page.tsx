@@ -20,6 +20,7 @@ const DOC_LABELS: Record<string, string> = {
   packing_list: "Packing List",
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
+  export_declaration: "Export Declaration / Annexure",
 };
 
 type Shipment = {

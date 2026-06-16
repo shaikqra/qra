@@ -4,6 +4,7 @@ import { buildCommercialInvoicePdf } from "@/lib/pdf/commercial-invoice";
 import { buildPackingListPdf } from "@/lib/pdf/packing-list";
 import { buildCertificateOfOriginPdf } from "@/lib/pdf/certificate-of-origin";
 import { buildShippingBillPackPdf } from "@/lib/pdf/shipping-bill-pack";
+import { buildExportDeclarationPdf } from "@/lib/pdf/export-declaration";
 import { isEuDestination } from "@/lib/docs/destinations";
 
 // Shared document-generation engine. Called by the dashboard buttons
@@ -19,6 +20,7 @@ const PACKING_GENERATOR = "pdf-lib / packing-list@v1";
 const COO_GENERATOR = "pdf-lib / certificate-of-origin@v1";
 const PROFORMA_GENERATOR = "pdf-lib / proforma-invoice@v1";
 const SBPACK_GENERATOR = "pdf-lib / shipping-bill-pack@v1";
+const EXPORT_DECL_GENERATOR = "pdf-lib / export-declaration@v1";
 
 const DEMO_SELLER = {
   name: "[Exporter — set in Settings]",
@@ -70,7 +72,8 @@ async function storeDocument(opts: {
     | "packing_list"
     | "certificate_of_origin"
     | "proforma_invoice"
-    | "shipping_bill_pack";
+    | "shipping_bill_pack"
+    | "export_declaration";
   fileSlug: string;
   generator: string;
   pdfBytes: Uint8Array;
@@ -337,6 +340,72 @@ export async function generateCertificateOfOriginCore(
     docType: "certificate_of_origin",
     fileSlug: "certificate-of-origin",
     generator: COO_GENERATOR,
+    pdfBytes,
+    sourceData: d,
+    generatedBy,
+  });
+}
+
+export async function generateExportDeclarationCore(
+  shipmentId: string,
+  generatedBy: string | null
+): Promise<GenerateResult> {
+  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  if (!shipment) return { ok: false, error: "Shipment not found" };
+
+  const get = (k: string) => (d[k] ?? "").trim();
+  const prof = (k: string) => (p[k] ?? "").trim();
+
+  const required: [string, string][] = [
+    ["buyer_name", "Buyer name"],
+    ["product_description", "Product description"],
+    ["quantity", "Quantity"],
+    ["value_amount", "Invoice value"],
+    ["value_currency", "Currency"],
+    ["hs_code", "HS code"],
+    ["destination_country", "Destination country"],
+  ];
+  const missing = required.filter(([k]) => !get(k)).map(([, label]) => label);
+  if (missing.length > 0) {
+    return { ok: false, error: `Fill these fields first: ${missing.join(", ")}` };
+  }
+
+  const destination = get("destination_country");
+  const pdfBytes = await buildExportDeclarationPdf({
+    reference: shipment.reference_number as string,
+    date: new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+    invoiceRef: `CI-${shipment.reference_number}`,
+    exporter: {
+      name: prof("legal_name") || DEMO_SELLER.name,
+      address: prof("address"),
+      iec: prof("iec"),
+      gstin: prof("gstin"),
+    },
+    buyer: { name: get("buyer_name"), address: get("buyer_address") },
+    destinationCountry: destination,
+    countryOfOrigin: get("country_of_origin") || "India",
+    incoterm: (get("incoterm") || prof("default_incoterm")).toUpperCase(),
+    hsCode: get("hs_code"),
+    productDescription: get("product_description"),
+    quantity: get("quantity"),
+    quantityUnit: get("quantity_unit"),
+    value: get("value_amount"),
+    currency: (get("value_currency") || prof("default_currency")).toUpperCase(),
+    declarations: {
+      lut: prof("declaration_lut") || undefined,
+      rodtep: prof("declaration_rodtep") || undefined,
+      // EU GSP/REX statement only for EU destinations (same rule as the invoice).
+      origin: isEuDestination(destination) ? prof("declaration_origin") || undefined : undefined,
+    },
+  });
+
+  return storeDocument({
+    admin,
+    shipmentId,
+    customerId: shipment.customer_id as string,
+    docType: "export_declaration",
+    fileSlug: "export-declaration",
+    generator: EXPORT_DECL_GENERATOR,
     pdfBytes,
     sourceData: d,
     generatedBy,
