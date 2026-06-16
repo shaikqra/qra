@@ -34,6 +34,7 @@ export type ShippingBillPackData = {
   invoiceValue: string;
   currency: string;
   rodtepIntent: boolean;
+  hsCodeDrafted?: boolean;
 };
 
 const PAGE_W = 595.28;
@@ -148,7 +149,7 @@ export async function buildShippingBillPackPdf(
 
   // --- goods ------------------------------------------------------------------
   section("Goods");
-  row("HS code", data.hsCode);
+  row("HS code", data.hsCodeDrafted ? `${data.hsCode}  (Qra draft — CHA to confirm)` : data.hsCode);
   row("Description", data.productDescription);
   row("Quantity", `${data.quantity} ${data.quantityUnit}`.trim());
   row("Packages", `${data.numberOfPackages} ${data.packageType}`.trim());
@@ -158,7 +159,16 @@ export async function buildShippingBillPackPdf(
 
   // --- schemes ----------------------------------------------------------------
   section("Scheme intents");
-  row("RoDTEP", data.rodtepIntent ? "YES — exporter intends to claim RoDTEP" : "Not indicated");
+  // RoDTEP rates are HS-line-specific, so when the HS itself is a Qra draft the
+  // claim can't be asserted as a flat YES — bind it to the CHA confirming the code.
+  row(
+    "RoDTEP",
+    !data.rodtepIntent
+      ? "Not indicated"
+      : data.hsCodeDrafted
+        ? "Exporter intends to claim RoDTEP. Rate is HS-specific and the HS code above is a Qra draft — CHA to confirm the code and the applicable RoDTEP rate/eligibility before filing."
+        : "YES — exporter intends to claim RoDTEP"
+  );
   row("Drawback", "");
 
   // --- footer -----------------------------------------------------------------

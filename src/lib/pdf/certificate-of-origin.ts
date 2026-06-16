@@ -15,6 +15,7 @@ export type CertificateOfOriginData = {
   portOfDischarge?: string;
   vessel?: string;
   hsCode: string;
+  hsCodeDrafted?: boolean;
   productDescription: string;
   quantity: string;
   quantityUnit: string;
@@ -164,6 +165,10 @@ export async function buildCertificateOfOriginPdf(
   if (data.grossWeight) {
     y -= 14;
     draw(`Gross weight: ${data.grossWeight} ${data.weightUnit ?? ""}`.trim(), COL_DESC, y, 9, font, GREY);
+  }
+  if (data.hsCodeDrafted) {
+    y -= 14;
+    draw("HS code is a Qra draft — to be confirmed by the CHA / issuing authority.", COL_DESC, y, 8, font, GREY);
   }
 
   y -= 16;

@@ -6,6 +6,7 @@ import { buildCertificateOfOriginPdf } from "@/lib/pdf/certificate-of-origin";
 import { buildShippingBillPackPdf } from "@/lib/pdf/shipping-bill-pack";
 import { buildExportDeclarationPdf } from "@/lib/pdf/export-declaration";
 import { isEuDestination } from "@/lib/docs/destinations";
+import { readDraftedFields } from "@/lib/docs/verify-gate";
 
 // Shared document-generation engine. Called by the dashboard buttons
 // (generatedBy = operator id) and by the WhatsApp auto-pipeline
@@ -323,6 +324,7 @@ export async function generateCertificateOfOriginCore(
     portOfDischarge: get("port_of_discharge") || undefined,
     vessel: get("vessel_name") || undefined,
     hsCode: get("hs_code"),
+    hsCodeDrafted: readDraftedFields(d).includes("hs_code"),
     productDescription: get("product_description"),
     quantity: get("quantity"),
     quantityUnit: get("quantity_unit"),
@@ -386,6 +388,7 @@ export async function generateExportDeclarationCore(
     countryOfOrigin: get("country_of_origin") || "India",
     incoterm: (get("incoterm") || prof("default_incoterm")).toUpperCase(),
     hsCode: get("hs_code"),
+    hsCodeDrafted: readDraftedFields(d).includes("hs_code"),
     productDescription: get("product_description"),
     quantity: get("quantity"),
     quantityUnit: get("quantity_unit"),
@@ -459,6 +462,7 @@ export async function generateShippingBillPackCore(
     portOfDischarge: get("port_of_discharge") || undefined,
     incoterm: (get("incoterm") || prof("default_incoterm")).toUpperCase(),
     hsCode: get("hs_code"),
+    hsCodeDrafted: readDraftedFields(d).includes("hs_code"),
     productDescription: get("product_description"),
     quantity: get("quantity"),
     quantityUnit: get("quantity_unit"),

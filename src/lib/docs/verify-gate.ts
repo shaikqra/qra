@@ -35,6 +35,19 @@ export function readStoredConfidence(merged: Record<string, string>): Record<str
   }
 }
 
+// Fields Qra DRAFTED (not extracted) — e.g. an HS code worked out from the goods
+// when the PO carried none. Stashed under a reserved key so every surface that
+// builds the verify message can word them honestly ("I worked this out") rather
+// than as something we read off the PO.
+export function readDraftedFields(merged: Record<string, string>): string[] {
+  try {
+    const v = JSON.parse(merged["_drafted"] ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 // One line per field the exporter should check. A malformed field (a validation
 // issue) needs a real correction; a merely low-confidence field just needs a
 // yes/no. An issue takes priority over a low-confidence flag on the same field.
@@ -45,6 +58,7 @@ export function verifyFieldLines(
 ): string[] {
   const lines: string[] = [];
   const issueFields = new Set(issues.map((i) => i.field));
+  const drafted = new Set(readDraftedFields(merged));
   for (const issue of issues) {
     const v = (merged[issue.field] ?? "").trim() || "—";
     lines.push(`• ${label(issue.field)}: ${v} — ${issue.reason}. Please send the correct value.`);
@@ -52,7 +66,15 @@ export function verifyFieldLines(
   for (const field of shaky) {
     if (issueFields.has(field)) continue; // already listed with its reason
     const v = (merged[field] ?? "").trim() || "—";
-    lines.push(`• ${label(field)}: ${v} — is this right?`);
+    // A field Qra worked out itself (not on the PO) is worded so the exporter
+    // confirms the GOODS and passes the code to their CHA — never asked to certify
+    // a classification they can't judge. Names the duty/RoDTEP stake + the CHA as
+    // the authority, so a CONFIRM means "acknowledged, route to CHA", not "I certify".
+    lines.push(
+      drafted.has(field)
+        ? `• ${label(field)}: ${v} — Qra suggested this from your goods; your PO didn't carry one. It affects your duty and RoDTEP, so your CHA confirms it before filing. If you already know the right code, send it; otherwise reply CONFIRM and we'll mark it a draft for your CHA.`
+        : `• ${label(field)}: ${v} — is this right?`
+    );
   }
   return lines;
 }

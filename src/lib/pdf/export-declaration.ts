@@ -15,6 +15,7 @@ export type ExportDeclarationData = {
   countryOfOrigin: string;
   incoterm: string;
   hsCode: string;
+  hsCodeDrafted?: boolean;
   productDescription: string;
   quantity: string;
   quantityUnit: string;
@@ -132,7 +133,7 @@ export async function buildExportDeclarationPdf(data: ExportDeclarationData): Pr
   row("Buyer", `${data.buyer.name}${data.buyer.address ? " — " + data.buyer.address : ""}`.trim());
   row("Destination", data.destinationCountry);
   row("Incoterm", data.incoterm);
-  row("HS code", data.hsCode);
+  row("HS code", data.hsCodeDrafted ? `${data.hsCode}  (Qra draft — CHA to confirm classification)` : data.hsCode);
   row("Goods", data.productDescription);
   row("Quantity", `${data.quantity} ${data.quantityUnit}`.trim());
   row("Invoice value", `${data.currency} ${data.value}`.trim());

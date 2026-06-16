@@ -7,6 +7,7 @@ import { missingFieldLines } from "@/lib/docs/gap-message";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { verifyAskMessage } from "@/lib/docs/verify-gate";
+import { classifyHsCode } from "@/lib/ai/classify-hs";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 
 // A one-line, human-readable summary of the drafted order for the confirm ask.
@@ -192,6 +193,41 @@ export async function runAutoPipeline(args: {
         missingCount: missing.length,
       });
       return;
+    }
+
+    // HS code unlocks the export declaration + shipping-bill checklist, but POs
+    // rarely carry one. If it's missing, draft it from the goods (advisory — one
+    // small model call) and mark it low-confidence so the verify gate asks the
+    // EXPORTER to confirm it before it ever rides on a customs document; a guess
+    // is never filed. On a verified resume the HS is already set, so this is a
+    // no-op and the confirmed value flows straight through to generation.
+    if (
+      !args.skipLowConfidence &&
+      !(merged["hs_code"] ?? "").trim() &&
+      (merged["product_description"] ?? "").trim()
+    ) {
+      const hs = await classifyHsCode(merged["product_description"], "");
+      if (hs?.suggested) {
+        merged["hs_code"] = hs.suggested;
+        // Below the 0.75 trust threshold so lowConfidenceFields surfaces it; the
+        // _drafted marker lets the verify message say Qra worked it out, not read it.
+        (confidence as Record<string, number>)["hs_code"] = 0.5;
+        merged["_confidence"] = JSON.stringify(confidence);
+        merged["_drafted"] = JSON.stringify(["hs_code"]);
+        await admin
+          .from("shipments")
+          .update({ extracted_data: merged })
+          .eq("id", args.shipmentId);
+        await admin.from("audit_operator_action").insert({
+          operator_id: null,
+          shipment_id: args.shipmentId,
+          action_type: "note",
+          old_value: null,
+          // Keep the classifier's reasoning — it's the documented "why this code"
+          // for the audit trail and the CHA, and we already paid for it.
+          new_value: { event: "hs_code_drafted", suggested: hs.suggested, note: hs.note },
+        });
+      }
     }
 
     // Trust gate: deterministic rules + extraction confidence. Anything the
