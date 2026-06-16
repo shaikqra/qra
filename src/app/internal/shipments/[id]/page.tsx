@@ -7,6 +7,7 @@ import { ExtractionForm } from "./extraction-form";
 import { InvoicePanel } from "./invoice-panel";
 import { AiCorrect } from "./ai-correct";
 import { VerifyChain } from "./verify-chain";
+import { FreightPanel } from "./freight-panel";
 import { toActivities } from "@/lib/shipment-activity";
 
 type Shipment = {
@@ -265,6 +266,13 @@ export default async function ShipmentDetailPage({
         <div className="mt-3">
           <AiCorrect shipmentId={ship.id} data={(ship.extracted_data ?? {}) as Record<string, string>} />
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
+          Freight
+        </h2>
+        <FreightPanel shipmentId={ship.id} />
       </section>
 
       <section>
