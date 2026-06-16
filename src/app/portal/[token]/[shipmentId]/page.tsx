@@ -15,6 +15,7 @@ import { FreightGate } from "./freight-gate";
 import { OptionalDocs } from "./optional-docs";
 import { agentFleet } from "@/lib/portal/agent-fleet";
 import { AgentFleet } from "./agent-fleet";
+import { LiveRefresh } from "./live-refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -125,6 +126,16 @@ export default async function PortalShipment({
     awarded: !!rankedFreight.awarded,
   });
 
+  // Poll for live agent-card updates only while an agent is actively working (the
+  // status will change on its own). At a waiting gate or a terminal state the next
+  // move needs a human, so we don't poll.
+  const liveActive = [
+    "data_extracting",
+    "sanctions_screening",
+    "generating_documents",
+    "customer_approved",
+  ].includes(ship.status);
+
   // If a status gate is already popping up, the freight gate stays a banner (not a
   // second auto-opening modal). These are exactly the statuses GateActions opens on.
   const statusGateActive = [
@@ -183,6 +194,7 @@ export default async function PortalShipment({
         </div>
       </section>
 
+      <LiveRefresh active={liveActive} />
       <AgentFleet cards={fleet} />
 
       <section>
