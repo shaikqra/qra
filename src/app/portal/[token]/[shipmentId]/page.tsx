@@ -13,6 +13,8 @@ import { Timeline } from "../timeline";
 import { GateActions } from "./gate-actions";
 import { FreightGate } from "./freight-gate";
 import { OptionalDocs } from "./optional-docs";
+import { agentFleet } from "@/lib/portal/agent-fleet";
+import { AgentFleet } from "./agent-fleet";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +119,12 @@ export default async function PortalShipment({
   // Freight quotes for the G4 gate (shipment already verified as this customer's).
   const rankedFreight = await loadRankedFreight(admin, shipmentId);
 
+  // Agent cards: what the fleet is doing on this shipment, from real state.
+  const fleet = agentFleet(ship.status, {
+    pending: !rankedFreight.awarded && rankedFreight.ranked.length > 0,
+    awarded: !!rankedFreight.awarded,
+  });
+
   // Verify gate (G1): the exact fields Qra wasn't sure about, surfaced for the
   // exporter to confirm or correct. Same computation as the WhatsApp message.
   let verifyLines: string[] = [];
@@ -161,6 +169,8 @@ export default async function PortalShipment({
           <Timeline status={ship.status} />
         </div>
       </section>
+
+      <AgentFleet cards={fleet} />
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Order</h2>
