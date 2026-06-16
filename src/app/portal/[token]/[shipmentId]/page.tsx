@@ -125,6 +125,19 @@ export default async function PortalShipment({
     awarded: !!rankedFreight.awarded,
   });
 
+  // If a status gate is already popping up, the freight gate stays a banner (not a
+  // second auto-opening modal). These are exactly the statuses GateActions opens on.
+  const statusGateActive = [
+    "awaiting_order_confirm",
+    "awaiting_customer_verify",
+    "awaiting_customer_approval",
+    "awaiting_customer_info",
+    "filed_with_cha",
+    "customs_cleared",
+    "in_transit",
+    "delivered",
+  ].includes(ship.status);
+
   // Verify gate (G1): the exact fields Qra wasn't sure about, surfaced for the
   // exporter to confirm or correct. Same computation as the WhatsApp message.
   let verifyLines: string[] = [];
@@ -191,6 +204,7 @@ export default async function PortalShipment({
         awarded={rankedFreight.awarded}
         recommendationId={rankedFreight.recommendationId}
         reason={rankedFreight.reason}
+        autoOpen={!statusGateActive}
       />
 
       <section>
