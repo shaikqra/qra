@@ -45,6 +45,7 @@ const FUNNEL: { status: string; label: string; bar: string }[] = [
   { status: "generating_documents", label: "Generating docs", bar: "bg-violet-400" },
   { status: "bucket_b_review", label: "Your review", bar: "bg-indigo-400" },
   { status: "awaiting_customer_approval", label: "Awaiting approval", bar: "bg-yellow-500" },
+  { status: "awaiting_goods_ready", label: "Goods ready?", bar: "bg-amber-500" },
   { status: "customer_approved", label: "Customer approved", bar: "bg-green-400" },
   { status: "filed_with_cha", label: "Filed with CHA", bar: "bg-teal-400" },
   { status: "customs_cleared", label: "Customs cleared", bar: "bg-emerald-400" },

@@ -15,7 +15,13 @@ import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } 
 import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
 import { computeProposedValue } from "@/lib/docs/compute-value";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
-import { verifyAskMessage, verifyKeys, readStoredConfidence } from "@/lib/docs/verify-gate";
+import {
+  verifyAskMessage,
+  verifyKeys,
+  readStoredConfidence,
+  readDraftedFields,
+  readNeededFields,
+} from "@/lib/docs/verify-gate";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import { generateCoreDocSet } from "@/lib/docs/generate";
 import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
@@ -661,10 +667,11 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
   );
 }
 
-// "Yes/confirm" is ambiguous when a customer has BOTH finished docs awaiting
-// approval AND a freshly-emailed order awaiting confirmation. Resolve it by
-// recency: the affirmative answers whichever gate they most recently entered.
-// Returns that shipment's status, or null if neither gate is pending.
+// A reply is ambiguous when a customer has several live shipments at different
+// gates. Resolve it by recency: the reply most likely answers whichever gate they
+// most recently entered. Includes the gap-fill gate (awaiting_customer_info) so a
+// fresh "here's the missing value" reply isn't mis-ordered behind an older verify
+// shipment. Returns that shipment's status, or null if no gate is pending.
 async function newestAffirmativeGate(customerId: string): Promise<string | null> {
   const supabase = createSupabaseServerClient();
   const { data } = await supabase
@@ -676,6 +683,7 @@ async function newestAffirmativeGate(customerId: string): Promise<string | null>
       "awaiting_order_confirm",
       "awaiting_customer_verify",
       "awaiting_goods_ready",
+      "awaiting_customer_info",
     ])
     // Most recently touched gate = the one the customer most likely just answered.
     .order("updated_at", { ascending: false })
@@ -702,8 +710,15 @@ async function handleGoodsReadyReply(customerId: string, body: string): Promise<
     .maybeSingle();
   if (!shipment) return null;
 
-  // Only a clear readiness signal advances it.
-  if (!/\bready\b/i.test(body) && !isApprovalMessage(body)) return null;
+  // Only a clear readiness signal advances it — accept "ready" or a plain yes/ok,
+  // but NOT "approve"/"confirm" (document-approval words that could fire the CHA
+  // hand-off before the goods are actually ready to ship). Block an explicit
+  // refusal ("not ready", "not yet", "isn't ready") — but only when the negation
+  // actually negates readiness, so a stray "no" in a positive reply ("no delays,
+  // goods are ready") still advances. A bare "no" has no readiness word and falls
+  // through the affirmative check below anyway.
+  if (/(?:\bnot|n['’]?t)\s+(?:yet|ready|packed|done|finished|shipped|dispatched)\b/i.test(body)) return null;
+  if (!/\b(ready|good to go|dispatched|shipped|yes|yeah|yep|ok|okay|done)\b/i.test(body)) return null;
 
   const shipmentId = shipment.id as string;
   const ref = shipment.reference_number as string;
@@ -763,18 +778,31 @@ async function handleVerifyReply(customerId: string, body: string): Promise<stri
   const found = await parseGapReply(body.slice(0, 1000), verifyKeys(current, issues, shaky));
   let merged = current;
   if (Object.keys(found).length > 0) {
+    const changed = Object.keys(found);
     merged = { ...current, ...found };
+    // Clear the "Qra drafted this" / "exporter still owes this" markers for the
+    // fields the exporter just corrected, and lift their confidence — the human
+    // has now vouched for them. Mirrors the portal verify path so the two channels
+    // leave identical internal state (otherwise a corrected HS code still carries a
+    // hidden "Qra guessed this" note forever).
+    merged["_drafted"] = JSON.stringify(readDraftedFields(merged).filter((f) => !changed.includes(f)));
+    merged["_needed"] = JSON.stringify(readNeededFields(merged).filter((f) => !changed.includes(f)));
+    const conf = readStoredConfidence(merged);
+    for (const k of changed) conf[k] = 0.99;
+    merged["_confidence"] = JSON.stringify(conf);
     await supabase
       .from("shipments")
       .update({ extracted_data: merged })
       .eq("id", shipmentId)
       .eq("status", "awaiting_customer_verify");
+    // Audit the correction by field NAME only — never dump the full extracted_data
+    // (PII: buyer, value, addresses) into the trail.
     await supabase.from("audit_operator_action").insert({
       operator_id: null, // customer corrected the values
       shipment_id: shipmentId,
       action_type: "extract",
-      old_value: current,
-      new_value: merged,
+      old_value: null,
+      new_value: { event: "fields_corrected", via: "whatsapp", fields: changed },
     });
   }
 
@@ -1051,17 +1079,19 @@ export async function POST(req: NextRequest) {
       // stale awaiting-approval shipment from swallowing a fresh order's CONFIRM.
       // Gap-fill (value confirmation) stays the final fallback, as before.
       const gate = await newestAffirmativeGate(customerId);
-      // "yes/confirm" answers the customer's MOST RECENT gate. The three gate
-      // handlers each only fire on their own status, so this is purely about
-      // which to try first when several are pending at once.
+      // "yes/confirm" answers the customer's MOST RECENT gate. Each gate handler
+      // only fires on its own status, so this ordering is purely about which to
+      // try first when several gates are pending for one customer at once.
       const affirmativeHandlers =
-        gate === "awaiting_customer_verify"
-          ? [handleVerifyReply, handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply]
-          : gate === "awaiting_order_confirm"
-            ? [handleOrderConfirmReply, handleGoodsReadyReply, handleApprovalReply, handleVerifyReply]
-            : gate === "awaiting_goods_ready"
-              ? [handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply, handleVerifyReply]
-              : [handleApprovalReply, handleGoodsReadyReply, handleOrderConfirmReply, handleVerifyReply];
+        gate === "awaiting_customer_info"
+          ? [handleGapFillReply, handleApprovalReply, handleGoodsReadyReply, handleOrderConfirmReply, handleVerifyReply]
+          : gate === "awaiting_customer_verify"
+            ? [handleVerifyReply, handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply]
+            : gate === "awaiting_order_confirm"
+              ? [handleOrderConfirmReply, handleGoodsReadyReply, handleApprovalReply, handleVerifyReply]
+              : gate === "awaiting_goods_ready"
+                ? [handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply, handleVerifyReply]
+                : [handleApprovalReply, handleGoodsReadyReply, handleOrderConfirmReply, handleVerifyReply];
       for (const handler of affirmativeHandlers) {
         const reply = await handler(customerId, body);
         if (reply) return twimlResponse(reply);

@@ -16,13 +16,46 @@ export type TradeGraphRule<T = unknown> = {
   version: number;
 };
 
+// Common country-name variants → one canonical name, so two POs to the same place
+// land on the SAME lane (otherwise the verified rule is never reused and the moat
+// never compounds). Not exhaustive — covers the frequent ones; anything else falls
+// through to its trimmed lowercase form (still consistent for identical inputs).
+const COUNTRY_ALIASES: Record<string, string> = {
+  usa: "united states",
+  us: "united states",
+  "u.s.": "united states",
+  "u.s.a.": "united states",
+  "united states of america": "united states",
+  america: "united states",
+  uk: "united kingdom",
+  "u.k.": "united kingdom",
+  britain: "united kingdom",
+  "great britain": "united kingdom",
+  england: "united kingdom",
+  uae: "united arab emirates",
+  "u.a.e.": "united arab emirates",
+  holland: "netherlands",
+  "the netherlands": "netherlands",
+  nl: "netherlands",
+  deutschland: "germany",
+  ksa: "saudi arabia",
+  saudi: "saudi arabia",
+  prc: "china",
+};
+
+function normalizeDestination(destination: string): string {
+  const d = destination.trim().toLowerCase().replace(/\s+/g, " ").replace(/[.,]+$/, "");
+  return COUNTRY_ALIASES[d] ?? d;
+}
+
 // A lane = destination + product family (HS HEADING = first 4 HS digits).
 // Cert/duty/doc rules are largely a function of (where it's going, what it is).
 // Heading not chapter (2 digits): a chapter is too broad — different products in one
 // chapter can need different certs, and a VERIFIED rule is served as authoritative
-// with no model call, so accuracy beats moat-accumulation speed here.
+// with no model call, so accuracy beats moat-accumulation speed here. Destination is
+// canonicalized so "USA"/"United States" don't split into two lanes.
 export function laneKey(destination: string, hsCode: string): string {
-  const dest = destination.trim().toLowerCase().replace(/\s+/g, " ");
+  const dest = normalizeDestination(destination);
   const digits = hsCode.replace(/\D/g, "");
   const heading = digits.length >= 4 ? digits.slice(0, 4) : "xxxx";
   return `${dest}|hs${heading}`;

@@ -21,7 +21,13 @@ export async function sendDocsToCha(shipmentId: string): Promise<Result> {
             ? "Email isn't configured yet — add the Resend keys."
             : result.reason === "no_docs"
               ? "No documents to send — generate documents first."
-              : "Could not send the email to the CHA. Check the Resend setup.";
+              : result.reason === "already_sent"
+                ? "These documents were already sent to the CHA."
+                : // "error" carries an operator-safe message (e.g. send is only
+                  // allowed once the customer has approved + confirmed goods ready).
+                  result.reason === "error"
+                  ? result.error
+                  : "Could not send the email to the CHA. Check the Resend setup.";
       return { ok: false, error: friendly };
     }
 

@@ -39,7 +39,9 @@ const DOC_LABELS: Record<string, string> = {
 // failure from "no CHA email yet" (which should not be treated as an error).
 // requireStatus (automatic path) atomically claims that status transition to
 // filed_with_cha before sending, so the broker is emailed exactly once. The
-// operator path omits it (an explicit re-send is allowed).
+// operator (manual) path omits requireStatus and is instead gated below to
+// customer_approved only — so it can't email before both human gates pass, and
+// can't double-send (once sent the status is filed_with_cha, not customer_approved).
 export async function sendDocsToChaCore(
   shipmentId: string,
   sentBy: string | null,
@@ -60,6 +62,20 @@ export async function sendDocsToChaCore(
     .maybeSingle();
   if (!shipment) return { ok: false, reason: "error", error: "Shipment not found" };
   const ref = shipment.reference_number as string;
+
+  // Operator manual send (no requireStatus): only once the customer has approved
+  // AND confirmed goods ready (status customer_approved). Blocks (a) emailing the
+  // broker before both human gates pass, and (b) an accidental double-send — after
+  // a send the status is filed_with_cha, so a repeat click is refused here.
+  if (!requireStatus && shipment.status !== "customer_approved") {
+    return shipment.status === "filed_with_cha"
+      ? { ok: false, reason: "already_sent", error: "These documents were already sent to the CHA." }
+      : {
+          ok: false,
+          reason: "error",
+          error: "Send to the CHA once the customer has approved and confirmed the goods are ready.",
+        };
+  }
 
   // This exporter's default broker (or the first with an email). We never fall
   // back to another exporter's broker — better to flag "no CHA" than misdeliver.
