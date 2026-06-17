@@ -75,18 +75,23 @@ export default async function PortalHome({ params }: { params: Promise<{ token: 
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500">
-          <div className="font-medium text-zinc-700">No shipments yet.</div>
-          <div className="mt-1.5">
-            Send a purchase order to Qra on WhatsApp
-            {poEmail ? (
-              <>
-                , or forward it (e.g. straight from your buyer&apos;s email) to{" "}
-                <span className="font-mono text-zinc-700">{poEmail}</span>
-              </>
-            ) : null}{" "}
-            — and it&apos;ll appear here.
-          </div>
+        <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center">
+          <div className="text-base font-semibold text-zinc-800">No shipments yet</div>
+          <p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">
+            Your orders appear here automatically. Send one to Qra on WhatsApp, or use your dedicated
+            purchase-order inbox:
+          </p>
+          {poEmail && (
+            <>
+              <div className="mx-auto mt-3 inline-block rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 font-mono text-sm text-zinc-800">
+                {poEmail}
+              </div>
+              <p className="mx-auto mt-3 max-w-md text-xs text-zinc-400">
+                Give this address to your buyers so their purchase orders arrive straight in — or forward
+                orders you&apos;ve already received.
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
