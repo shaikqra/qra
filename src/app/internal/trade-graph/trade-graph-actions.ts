@@ -6,16 +6,39 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type Result = { ok: true } | { ok: false; error: string };
 
-// Analyst verifies a draft Trade Graph rule: flips it to 'verified' with a citation
-// (the source it traces to — a notification / circular / regulation). One verified
-// rule per lane is DB-enforced. From then on every shipment on that lane uses it
-// instantly, cited — the moat compounding.
-export async function verifyTradeGraphRule(ruleId: string, citation: string): Promise<Result> {
+// Sanitize the analyst's curated cert list before it lands in the SHARED Trade
+// Graph: strings only, length + count capped, blank-name rows dropped. Never trust
+// client-shaped JSON into global data.
+function sanitizeCerts(payload: unknown): { name: string; note: string; issuedBy: string }[] {
+  if (!Array.isArray(payload)) return [];
+  const out: { name: string; note: string; issuedBy: string }[] = [];
+  for (const c of payload.slice(0, 20)) {
+    const o = (c ?? {}) as Record<string, unknown>;
+    const name = String(o.name ?? "").trim().slice(0, 120);
+    if (!name) continue;
+    out.push({
+      name,
+      note: String(o.note ?? "").trim().slice(0, 300),
+      issuedBy: String((o.issuedBy ?? o.issued_by) ?? "").trim().slice(0, 120),
+    });
+  }
+  return out;
+}
+
+// Analyst verifies a draft Trade Graph rule: saves their (possibly edited) cert list
+// + a citation (the source it traces to — a notification / circular / regulation)
+// and flips it to 'verified'. One verified rule per lane is DB-enforced. From then on
+// every shipment on that lane uses it instantly, cited — the moat compounding.
+export async function verifyTradeGraphRule(ruleId: string, citation: string, payload: unknown): Promise<Result> {
   const session = await getOperatorSession();
   if (!session) return { ok: false, error: "Not authorized" };
   const cite = citation.trim();
   if (!cite) {
     return { ok: false, error: "Add the source this rule traces to (a notification / circular / regulation) first." };
+  }
+  const certs = sanitizeCerts(payload);
+  if (certs.length === 0) {
+    return { ok: false, error: "Keep at least one certificate (with a name) before verifying." };
   }
 
   const admin = createSupabaseServerClient();
@@ -23,6 +46,7 @@ export async function verifyTradeGraphRule(ruleId: string, citation: string): Pr
     .from("trade_graph_rules")
     .update({
       status: "verified",
+      payload: certs,
       citation: cite.slice(0, 500),
       verified_by: session.userId,
       verified_at: new Date().toISOString(),

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { verifyTradeGraphRule, rejectTradeGraphRule } from "./trade-graph-actions";
 
-type Cert = { name?: string; note?: string; issuedBy?: string; issued_by?: string };
+type Cert = { name: string; note: string; issuedBy: string };
 export type DraftRule = {
   id: string;
   rule_type: string;
@@ -15,8 +15,17 @@ export type DraftRule = {
 
 type Result = { ok: true } | { ok: false; error: string };
 
-function certs(payload: unknown): Cert[] {
-  return Array.isArray(payload) ? (payload as Cert[]) : [];
+function toRows(payload: unknown): Cert[] {
+  const arr = Array.isArray(payload) ? payload : [];
+  const rows = arr.map((c) => {
+    const o = (c ?? {}) as { name?: unknown; note?: unknown; issuedBy?: unknown; issued_by?: unknown };
+    return {
+      name: String(o.name ?? "").trim(),
+      note: String(o.note ?? "").trim(),
+      issuedBy: String((o.issuedBy ?? o.issued_by) ?? "").trim(),
+    };
+  });
+  return rows.length ? rows : [{ name: "", note: "", issuedBy: "" }];
 }
 
 function DraftCard({ rule }: { rule: DraftRule }) {
@@ -24,6 +33,12 @@ function DraftCard({ rule }: { rule: DraftRule }) {
   const [pending, start] = useTransition();
   const [citation, setCitation] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<Cert[]>(() => toRows(rule.payload));
+
+  const setRow = (i: number, patch: Partial<Cert>) =>
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const addRow = () => setRows((rs) => [...rs, { name: "", note: "", issuedBy: "" }]);
+  const removeRow = (i: number) => setRows((rs) => rs.filter((_, j) => j !== i));
 
   function run(fn: () => Promise<Result>) {
     setError(null);
@@ -34,24 +49,51 @@ function DraftCard({ rule }: { rule: DraftRule }) {
     });
   }
 
-  const list = certs(rule.payload);
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <div className="flex items-baseline justify-between gap-3">
         <div className="font-mono text-sm font-semibold text-zinc-900">{rule.lane_key}</div>
         <div className="text-[11px] uppercase tracking-wide text-zinc-400">{rule.rule_type}</div>
       </div>
-      <ul className="mt-2 flex flex-col gap-1.5">
-        {list.map((c, i) => (
-          <li key={i} className="text-sm text-zinc-700">
-            <span className="font-semibold">{c.name}</span>
-            {c.note ? <span className="text-zinc-500"> — {c.note}</span> : null}
-            {c.issuedBy || c.issued_by ? (
-              <span className="text-[11px] text-zinc-400"> · {c.issuedBy ?? c.issued_by}</span>
-            ) : null}
-          </li>
+      <p className="mt-1 text-xs text-zinc-500">Edit the AI draft, then verify with its source.</p>
+
+      <div className="mt-3 flex flex-col gap-2">
+        {rows.map((r, i) => (
+          <div key={i} className="rounded-lg border border-zinc-200 p-2">
+            <div className="flex gap-2">
+              <input
+                value={r.name}
+                onChange={(e) => setRow(i, { name: e.target.value })}
+                placeholder="Certificate / document name"
+                className="min-w-0 flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+              />
+              <input
+                value={r.issuedBy}
+                onChange={(e) => setRow(i, { issuedBy: e.target.value })}
+                placeholder="Issued by"
+                className="w-40 rounded-md border border-zinc-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+              />
+              <button
+                onClick={() => removeRow(i)}
+                aria-label="Remove"
+                className="shrink-0 rounded-md border border-zinc-300 px-2 text-sm text-zinc-500 hover:bg-zinc-50"
+              >
+                ✕
+              </button>
+            </div>
+            <input
+              value={r.note}
+              onChange={(e) => setRow(i, { note: e.target.value })}
+              placeholder="Note — when / why it's needed"
+              className="mt-1.5 w-full rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
         ))}
-      </ul>
+        <button onClick={addRow} className="self-start text-xs font-semibold text-emerald-700 hover:text-emerald-800">
+          + Add certificate
+        </button>
+      </div>
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <input
           value={citation}
@@ -61,7 +103,7 @@ function DraftCard({ rule }: { rule: DraftRule }) {
         />
         <button
           disabled={pending}
-          onClick={() => run(() => verifyTradeGraphRule(rule.id, citation))}
+          onClick={() => run(() => verifyTradeGraphRule(rule.id, citation, rows))}
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
         >
           {pending ? "…" : "Verify"}
@@ -85,8 +127,8 @@ export function TradeGraphReview({ drafts, verifiedCount }: { drafts: DraftRule[
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">Trade Graph</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Verified rules: <span className="font-semibold text-emerald-700">{verifiedCount}</span>. Verify a draft once
-          (with its source) and every future shipment on that lane uses it instantly.
+          Verified rules: <span className="font-semibold text-emerald-700">{verifiedCount}</span>. Edit a draft, verify
+          it once with its source, and every future shipment on that lane uses it instantly.
         </p>
       </div>
 
