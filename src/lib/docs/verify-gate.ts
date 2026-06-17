@@ -54,6 +54,18 @@ export function readDraftedFields(merged: Record<string, string>): string[] {
   }
 }
 
+// Fields Qra NEEDS the exporter to PROVIDE — missing and not derivable (e.g. an HS
+// code the classifier couldn't work out). The verify gate asks for them instead of
+// silently skipping the documents that require them.
+export function readNeededFields(merged: Record<string, string>): string[] {
+  try {
+    const v = JSON.parse(merged["_needed"] ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 // One line per field the exporter should check. A malformed field (a validation
 // issue) needs a real correction; a merely low-confidence field just needs a
 // yes/no. An issue takes priority over a low-confidence flag on the same field.
@@ -65,22 +77,28 @@ export function verifyFieldLines(
   const lines: string[] = [];
   const issueFields = new Set(issues.map((i) => i.field));
   const drafted = new Set(readDraftedFields(merged));
+  const needed = new Set(readNeededFields(merged));
   for (const issue of issues) {
     const v = (merged[issue.field] ?? "").trim() || "—";
     lines.push(`• ${label(issue.field)}: ${v} — ${issue.reason}. Please send the correct value.`);
   }
-  for (const field of shaky) {
+  // Low-confidence/drafted fields PLUS any "needed" fields Qra must be given.
+  for (const field of Array.from(new Set([...shaky, ...needed]))) {
     if (issueFields.has(field)) continue; // already listed with its reason
     const v = (merged[field] ?? "").trim() || "—";
-    // A field Qra worked out itself (not on the PO) is worded so the exporter
-    // confirms the GOODS and passes the code to their CHA — never asked to certify
-    // a classification they can't judge. Names the duty/RoDTEP stake + the CHA as
-    // the authority, so a CONFIRM means "acknowledged, route to CHA", not "I certify".
-    lines.push(
-      drafted.has(field)
-        ? `• ${label(field)}: ${v} — Qra suggested this from your goods; your PO didn't carry one. It affects your duty and RoDTEP, so your CHA confirms it before filing. If you already know the right code, send it; otherwise reply CONFIRM and we'll mark it a draft for your CHA.`
-        : `• ${label(field)}: ${v} — is this right?`
-    );
+    if (needed.has(field)) {
+      // Missing and not derivable — ask the exporter to provide it (never skip silently).
+      lines.push(`• ${label(field)} — I couldn't read this from your goods. Please reply with it.`);
+    } else if (drafted.has(field)) {
+      // A field Qra worked out itself (not on the PO) is worded so the exporter
+      // confirms the GOODS and passes the code to their CHA — never asked to certify
+      // a classification they can't judge.
+      lines.push(
+        `• ${label(field)}: ${v} — Qra suggested this from your goods; your PO didn't carry one. It affects your duty and RoDTEP, so your CHA confirms it before filing. If you already know the right code, send it; otherwise reply CONFIRM and we'll mark it a draft for your CHA.`
+      );
+    } else {
+      lines.push(`• ${label(field)}: ${v} — is this right?`);
+    }
   }
   return lines;
 }
@@ -105,4 +123,15 @@ export function verifyAskMessage(
 // The field keys an exporter's reply might correct — used to parse their answer.
 export function flaggedFieldKeys(issues: ValidationIssue[], shaky: string[]): string[] {
   return Array.from(new Set([...issues.map((i) => i.field), ...shaky]));
+}
+
+// Like flaggedFieldKeys, but also includes the "needed" fields Qra is asking the
+// exporter to PROVIDE — so their reply (e.g. an HS code) is parsed + the console
+// pop-up shows an input for it.
+export function verifyKeys(
+  merged: Record<string, string>,
+  issues: ValidationIssue[],
+  shaky: string[]
+): string[] {
+  return Array.from(new Set([...issues.map((i) => i.field), ...shaky, ...readNeededFields(merged)]));
 }

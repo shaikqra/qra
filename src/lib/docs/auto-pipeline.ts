@@ -6,7 +6,7 @@ import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } 
 import { missingFieldLines } from "@/lib/docs/gap-message";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
-import { verifyAskMessage } from "@/lib/docs/verify-gate";
+import { verifyAskMessage, readNeededFields } from "@/lib/docs/verify-gate";
 import { classifyHsCode } from "@/lib/ai/classify-hs";
 import { assessCertificationsCore } from "@/lib/certifications/assess";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
@@ -248,6 +248,22 @@ export async function runAutoPipeline(args: {
           // for the audit trail and the CHA, and we already paid for it.
           new_value: { event: "hs_code_drafted", suggested: hs.suggested, note: hs.note },
         });
+      } else {
+        // Couldn't work out an HS code at all — ASK the exporter for it at the
+        // verify gate instead of silently skipping the export declaration + SB
+        // checklist (the recurring "2 docs" failure). Never silent.
+        merged["_needed"] = JSON.stringify(["hs_code"]);
+        await admin
+          .from("shipments")
+          .update({ extracted_data: merged })
+          .eq("id", args.shipmentId);
+        await admin.from("audit_operator_action").insert({
+          operator_id: null,
+          shipment_id: args.shipmentId,
+          action_type: "note",
+          old_value: null,
+          new_value: { event: "hs_code_needed" },
+        });
       }
     }
 
@@ -268,6 +284,12 @@ export async function runAutoPipeline(args: {
     const optionalPackingKeys = new Set(Object.keys(OPTIONAL_PACKING_LABELS));
     const shakyPacking = shaky.filter((f) => optionalPackingKeys.has(f));
     const shakyBlocking = shaky.filter((f) => !optionalPackingKeys.has(f));
+
+    // Fields Qra needs the exporter to PROVIDE (e.g. an HS code it couldn't work
+    // out) — fold into the verify gate so they're asked, never silently skipped.
+    // Skipped on a verified resume so the gate can't loop on a field they declined.
+    const needed = args.skipLowConfidence ? [] : readNeededFields(merged);
+    const allBlocking = Array.from(new Set([...shakyBlocking, ...needed]));
     if (shakyPacking.length > 0) {
       for (const f of shakyPacking) delete merged[f];
       await admin
@@ -287,7 +309,7 @@ export async function runAutoPipeline(args: {
     // resolve — it's their PO. Surface the exact fields on WhatsApp and park at
     // the verify gate (blueprint G1: "the extracted order is correct"). This is
     // NOT the operator's queue — only sanctions/compliance (below) goes there.
-    if (issues.length > 0 || shakyBlocking.length > 0) {
+    if (issues.length > 0 || allBlocking.length > 0) {
       const { data: shipRow } = await admin
         .from("shipments")
         .select("customer_id, reference_number")
@@ -302,14 +324,14 @@ export async function runAutoPipeline(args: {
         new_value: {
           event: "customer_verify_requested",
           validation_issues: issues,
-          low_confidence_fields: shakyBlocking,
+          low_confidence_fields: allBlocking,
         },
       });
       if (shipRow) {
         const notified = await notifyCustomerWhatsApp(
           admin,
           shipRow.customer_id as string,
-          verifyAskMessage(shipRow.reference_number as string, merged, issues, shakyBlocking)
+          verifyAskMessage(shipRow.reference_number as string, merged, issues, allBlocking)
         );
         if (!notified) {
           // Couldn't reach the exporter — surface it so the order isn't stuck
@@ -326,7 +348,7 @@ export async function runAutoPipeline(args: {
       console.log("auto_pipeline_verify_gate", {
         shipmentId: args.shipmentId,
         issueCount: issues.length,
-        lowConfidenceCount: shakyBlocking.length,
+        blockingCount: allBlocking.length,
       });
       return;
     }

@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalRateLimited } from "@/lib/portal/auth";
 import { portalActionHint, portalStageIndex } from "@/lib/portal/stages";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
-import { verifyFieldLines, readStoredConfidence, readDraftedFields, fieldLabel, flaggedFieldKeys } from "@/lib/docs/verify-gate";
+import { verifyFieldLines, readStoredConfidence, readDraftedFields, fieldLabel, verifyKeys } from "@/lib/docs/verify-gate";
 import { isExporterVisibleDoc } from "@/lib/docs/doc-visibility";
 import { toActivities } from "@/lib/shipment-activity";
 import { loadRankedFreight } from "@/lib/freight/load";
@@ -197,7 +197,7 @@ export default async function PortalShipment({
     const shaky = lowConfidenceFields(ed2, readStoredConfidence(ed2));
     verifyLines = verifyFieldLines(ed2, issues, shaky);
     const drafted = new Set(readDraftedFields(ed2));
-    verifyFields = flaggedFieldKeys(issues, shaky).map((k) => ({
+    verifyFields = verifyKeys(ed2, issues, shaky).map((k) => ({
       key: k,
       label: fieldLabel(k),
       value: (ed2[k] ?? "").trim(),

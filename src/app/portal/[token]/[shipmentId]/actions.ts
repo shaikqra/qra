@@ -8,7 +8,7 @@ import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline"
 import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
 import { generateProformaInvoiceCore, generateCertificateOfOriginCore } from "@/lib/docs/generate";
 import { validateExtracted } from "@/lib/docs/validate";
-import { readDraftedFields, readStoredConfidence } from "@/lib/docs/verify-gate";
+import { readDraftedFields, readNeededFields, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { negotiateTargetFor } from "@/lib/freight/rank-quotes";
 
@@ -132,6 +132,7 @@ export async function portalVerifyOrder(
       const introduced = validateExtracted(merged).filter((i) => !before.has(sig(i)));
       if (introduced.length > 0) return { ok: false, error: introduced.map((i) => i.reason).join("; ") };
       merged["_drafted"] = JSON.stringify(readDraftedFields(merged).filter((f) => !changed.includes(f)));
+      merged["_needed"] = JSON.stringify(readNeededFields(merged).filter((f) => !changed.includes(f)));
       const conf = readStoredConfidence(merged);
       for (const k of changed) conf[k] = 0.99;
       merged["_confidence"] = JSON.stringify(conf);

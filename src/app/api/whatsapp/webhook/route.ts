@@ -15,7 +15,7 @@ import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } 
 import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
 import { computeProposedValue } from "@/lib/docs/compute-value";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
-import { verifyAskMessage, flaggedFieldKeys, readStoredConfidence } from "@/lib/docs/verify-gate";
+import { verifyAskMessage, verifyKeys, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import { generateCoreDocSet } from "@/lib/docs/generate";
@@ -805,9 +805,9 @@ async function handleVerifyReply(customerId: string, body: string): Promise<stri
   const issues = validateExtracted(current);
   const shaky = lowConfidenceFields(current, readStoredConfidence(current));
 
-  // Did they send corrected values? Parse the reply for the flagged fields and
-  // merge them in (their value overrides what we extracted).
-  const found = await parseGapReply(body.slice(0, 1000), flaggedFieldKeys(issues, shaky));
+  // Did they send corrected values? Parse the reply for the flagged fields (incl.
+  // any Qra needs them to PROVIDE, like an HS code) and merge them in.
+  const found = await parseGapReply(body.slice(0, 1000), verifyKeys(current, issues, shaky));
   let merged = current;
   if (Object.keys(found).length > 0) {
     merged = { ...current, ...found };
@@ -1118,18 +1118,19 @@ export async function POST(req: NextRequest) {
     } else {
       // Other text is most likely a gap-fill answer, then a verify-gate
       // correction, then a goods-ready signal, then a change request on a doc
-      // awaiting approval. Order-confirm runs LAST so a bare "no" answering one
-      // shipment's question can't accidentally cancel a different parked order.
-      const gapFillReply = await handleGapFillReply(customerId, body);
-      if (gapFillReply) return twimlResponse(gapFillReply);
-      const verifyReply = await handleVerifyReply(customerId, body);
-      if (verifyReply) return twimlResponse(verifyReply);
-      const goodsReadyReply = await handleGoodsReadyReply(customerId, body);
-      if (goodsReadyReply) return twimlResponse(goodsReadyReply);
-      const approvalReply = await handleApprovalReply(customerId, body);
-      if (approvalReply) return twimlResponse(approvalReply);
-      const confirmReply = await handleOrderConfirmReply(customerId, body);
-      if (confirmReply) return twimlResponse(confirmReply);
+      // awaiting approval. BUT if the customer's most-recent gate is the verify
+      // gate, a free-text reply is most likely the value it asked for (e.g. an HS
+      // code) — run verify FIRST so a competing awaiting-info shipment can't swallow
+      // it. Order-confirm stays LAST so a bare "no" can't cancel a different order.
+      const gate = await newestAffirmativeGate(customerId);
+      const handlers =
+        gate === "awaiting_customer_verify"
+          ? [handleVerifyReply, handleGapFillReply, handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply]
+          : [handleGapFillReply, handleVerifyReply, handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply];
+      for (const handler of handlers) {
+        const reply = await handler(customerId, body);
+        if (reply) return twimlResponse(reply);
+      }
     }
   } catch (err) {
     console.error("pending_reply_failed", {
