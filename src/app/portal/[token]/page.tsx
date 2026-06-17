@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalRateLimited } from "@/lib/portal/auth";
+import { getOrCreateInboundToken, inboundAddressFor } from "@/lib/email/inbound";
 import { PORTAL_STAGES, portalStageIndex, portalActionHint, portalStopped } from "@/lib/portal/stages";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +56,13 @@ export default async function PortalHome({ params }: { params: Promise<{ token: 
     .limit(100);
   const rows = (data ?? []) as Row[];
 
+  // The exporter's own PO email address — shown in the empty state so they know
+  // they can forward a PO by email too, not only WhatsApp.
+  const poEmail =
+    rows.length === 0
+      ? await getOrCreateInboundToken(customer.id).then((t) => (t ? inboundAddressFor(t) : null))
+      : null;
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -68,7 +76,17 @@ export default async function PortalHome({ params }: { params: Promise<{ token: 
 
       {rows.length === 0 ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500">
-          No shipments yet. Send a purchase order to Qra on WhatsApp to get started.
+          <div className="font-medium text-zinc-700">No shipments yet.</div>
+          <div className="mt-1.5">
+            Send a purchase order to Qra on WhatsApp
+            {poEmail ? (
+              <>
+                , or forward it (e.g. straight from your buyer&apos;s email) to{" "}
+                <span className="font-mono text-zinc-700">{poEmail}</span>
+              </>
+            ) : null}{" "}
+            — and it&apos;ll appear here.
+          </div>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
