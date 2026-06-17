@@ -221,7 +221,13 @@ export async function runAutoPipeline(args: {
       !(merged["hs_code"] ?? "").trim() &&
       (merged["product_description"] ?? "").trim()
     ) {
-      const hs = await classifyHsCode(merged["product_description"], "");
+      // Retry once on a transient miss — the classifier hitting an overload/timeout
+      // shouldn't silently cost the exporter their export declaration + SB checklist.
+      let hs = await classifyHsCode(merged["product_description"], "");
+      if (!hs?.suggested) {
+        await new Promise((r) => setTimeout(r, 800));
+        hs = await classifyHsCode(merged["product_description"], "");
+      }
       if (hs?.suggested) {
         merged["hs_code"] = hs.suggested;
         // Below the 0.75 trust threshold so lowConfidenceFields surfaces it; the
