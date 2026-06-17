@@ -2,6 +2,9 @@ import Link from "next/link";
 import { getChaSession } from "@/lib/supabase/cha-auth";
 import { ChaSignOut } from "./cha-signout";
 
+// Per-request + auth-gated — never prerender at build (Supabase reads runtime env).
+export const dynamic = "force-dynamic";
+
 // The broker (CHA) seat. Chrome only — each page gates with ensureCha(); the
 // login page lives under here too, so the layout itself must not redirect.
 export default async function ChaLayout({ children }: { children: React.ReactNode }) {

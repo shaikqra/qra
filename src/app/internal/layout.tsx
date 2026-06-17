@@ -3,6 +3,10 @@ import { redirect } from "next/navigation";
 import { getOperatorSession } from "@/lib/supabase/auth";
 import { SignOutButton } from "./sign-out-button";
 
+// Every operator page is auth-gated + per-request — never prerender at build
+// (the Supabase client reads runtime env). Applies to all routes under /internal.
+export const dynamic = "force-dynamic";
+
 export default async function InternalLayout({
   children,
 }: {

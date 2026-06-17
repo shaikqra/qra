@@ -1,5 +1,9 @@
 import { LoginForm } from "@/app/internal/login/login-form";
 
+// Auth page — render at request time, never prerendered at build (the Supabase
+// client reads env that only exists at runtime / in the deployment env).
+export const dynamic = "force-dynamic";
+
 // CHA sign-in — same magic-link mechanism as the operator login, but it
 // redirects into /cha after the link is used.
 export default async function ChaLoginPage({

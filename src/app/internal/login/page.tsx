@@ -1,5 +1,8 @@
 import { LoginForm } from "./login-form";
 
+// Auth page — render at request time, never prerendered at build.
+export const dynamic = "force-dynamic";
+
 export default async function LoginPage({
   searchParams,
 }: {
