@@ -1,0 +1,81 @@
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+// The Trade Graph: export rules as data, cited and version-pinned. Agents read a
+// VERIFIED rule for a lane (instant, cited, no model call); a miss is AI-drafted
+// and queued for an analyst to verify once — then it's instant forever.
+
+export type RuleStatus = "draft" | "verified";
+
+export type TradeGraphRule<T = unknown> = {
+  id: string;
+  ruleType: string;
+  laneKey: string;
+  payload: T;
+  citation: string | null;
+  status: RuleStatus;
+  version: number;
+};
+
+// A lane = destination + product family (HS HEADING = first 4 HS digits).
+// Cert/duty/doc rules are largely a function of (where it's going, what it is).
+// Heading not chapter (2 digits): a chapter is too broad — different products in one
+// chapter can need different certs, and a VERIFIED rule is served as authoritative
+// with no model call, so accuracy beats moat-accumulation speed here.
+export function laneKey(destination: string, hsCode: string): string {
+  const dest = destination.trim().toLowerCase().replace(/\s+/g, " ");
+  const digits = hsCode.replace(/\D/g, "");
+  const heading = digits.length >= 4 ? digits.slice(0, 4) : "xxxx";
+  return `${dest}|hs${heading}`;
+}
+
+function rowToRule<T>(r: {
+  id: string;
+  rule_type: string;
+  lane_key: string;
+  payload: unknown;
+  citation: string | null;
+  status: string;
+  version: number;
+}): TradeGraphRule<T> {
+  return {
+    id: r.id,
+    ruleType: r.rule_type,
+    laneKey: r.lane_key,
+    payload: r.payload as T,
+    citation: r.citation,
+    status: r.status as RuleStatus,
+    version: r.version,
+  };
+}
+
+// The authoritative (verified) rule for a lane, if one exists.
+export async function getVerifiedRule<T>(ruleType: string, lane: string): Promise<TradeGraphRule<T> | null> {
+  const admin = createSupabaseServerClient();
+  const { data } = await admin
+    .from("trade_graph_rules")
+    .select("id, rule_type, lane_key, payload, citation, status, version")
+    .eq("rule_type", ruleType)
+    .eq("lane_key", lane)
+    .eq("status", "verified")
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data ? rowToRule<T>(data) : null;
+}
+
+// Store an AI-drafted rule for an analyst to verify later. No-op if the lane
+// already has any rule (draft or verified) — we don't pile up duplicate drafts.
+// ⚠️ payload is GLOBAL / shared across customers — never store customer-specific
+// text in it (no buyer names, addresses, values). Keep it lane-generic.
+export async function storeDraftRule(ruleType: string, lane: string, payload: unknown): Promise<void> {
+  const admin = createSupabaseServerClient();
+  const { data: existing } = await admin
+    .from("trade_graph_rules")
+    .select("id")
+    .eq("rule_type", ruleType)
+    .eq("lane_key", lane)
+    .limit(1)
+    .maybeSingle();
+  if (existing) return;
+  await admin.from("trade_graph_rules").insert({ rule_type: ruleType, lane_key: lane, payload, status: "draft" });
+}

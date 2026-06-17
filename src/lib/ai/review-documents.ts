@@ -65,6 +65,7 @@ function buildTool(): Anthropic.Tool {
 function fieldsBlock(data: Record<string, string>): string {
   const lines: string[] = [];
   for (const [k, v] of Object.entries(data)) {
+    if (k.startsWith("_")) continue; // reserved internal state (_confidence/_drafted/_certifications…) — not a document field
     const val = (v ?? "").toString().trim();
     if (val) lines.push(`${k}: ${val}`);
   }

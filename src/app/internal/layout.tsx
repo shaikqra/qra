@@ -29,6 +29,9 @@ export default async function InternalLayout({
                 <Link href="/internal/shipments" className="hover:text-zinc-900">
                   Shipments
                 </Link>
+                <Link href="/internal/trade-graph" className="hover:text-zinc-900">
+                  Trade Graph
+                </Link>
                 <Link href="/internal/settings" className="hover:text-zinc-900">
                   Settings
                 </Link>

@@ -261,7 +261,7 @@ export default async function PortalShipment({
         )}
       </section>
 
-      <CertList items={certItems} />
+      <CertList items={certItems} source={f(ed, "_certifications_source")} citation={f(ed, "_certifications_citation")} />
 
       {activities.length > 0 && (
         <section>
