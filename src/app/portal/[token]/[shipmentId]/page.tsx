@@ -17,6 +17,8 @@ import { agentFleet } from "@/lib/portal/agent-fleet";
 import { AgentFleet } from "./agent-fleet";
 import { LiveRefresh } from "./live-refresh";
 import { CertList, type CertItem } from "./cert-list";
+import { documentProvenance } from "@/lib/provenance/fields";
+import { ProvenancePanel } from "./provenance-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -121,6 +123,17 @@ export default async function PortalShipment({
   // Freight quotes for the G4 gate (shipment already verified as this customer's).
   const rankedFreight = await loadRankedFreight(admin, shipmentId);
 
+  // Provenance: where every value on the documents came from (profile / PO / draft).
+  const { data: profileRow } = await admin
+    .from("exporter_profiles")
+    .select("*")
+    .eq("customer_id", customer.id)
+    .maybeSingle();
+  const provenance = documentProvenance(
+    (ed ?? {}) as Record<string, string>,
+    (profileRow ?? {}) as Record<string, string>
+  );
+
   // Certification agent output (advisory list, stored under the reserved key).
   let certItems: CertItem[] = [];
   try {
@@ -220,6 +233,8 @@ export default async function PortalShipment({
           <Detail k="Port of discharge" v={f(ed, "port_of_discharge")} />
         </div>
       </section>
+
+      <ProvenancePanel rows={provenance} />
 
       <FreightGate
         token={token}
