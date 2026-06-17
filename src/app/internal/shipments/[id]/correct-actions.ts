@@ -7,6 +7,7 @@ import { proposeCorrection } from "@/lib/ai/apply-correction";
 import { reviewDocuments, type DocReviewFlag } from "@/lib/ai/review-documents";
 import { classifyHsCode, type HsResult } from "@/lib/ai/classify-hs";
 import { generateCoreDocSet } from "@/lib/docs/generate";
+import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { validateExtracted } from "@/lib/docs/validate";
 
@@ -88,10 +89,11 @@ export async function checkHsCode(shipmentId: string): Promise<HsCheckResult> {
 // party name can't reach the documents without being checked.
 const PARTY_KEYS = ["buyer_name", "consignee_name", "notify_party_name"];
 
-// Documents become immutable once the customer approves them (Build Bible §8),
-// so the in-place AI correction is allowed ONLY while the shipment is still in
-// pre-approval review. After approval, the fix path is "request a change", not a
-// silent edit of an approved/filed pack.
+// Documents become immutable once the CUSTOMER approves them (Build Bible §8), so
+// in-place AI correction is allowed up to and including awaiting_customer_approval
+// (docs sent for review but NOT yet approved). After the customer approves
+// (customer_approved / goods-ready / filed), the fix path is "request a change",
+// not a silent edit of an approved pack.
 const CORRECTABLE = new Set([
   "po_received",
   "data_extracting",
@@ -99,6 +101,7 @@ const CORRECTABLE = new Set([
   "generating_documents",
   "sanctions_screening",
   "bucket_b_review",
+  "awaiting_customer_approval",
 ]);
 
 // Best-effort per-operator throttle (in-memory, per server instance, resets on
@@ -210,6 +213,12 @@ export async function applyAiCorrection(shipmentId: string, instruction: string)
   // Clean — redraft the documents (new versions; the old ones were never
   // approved, so nothing immutable is touched).
   await generateCoreDocSet(shipmentId, session.userId);
+
+  // If the customer already has the (now-stale) docs for approval, re-send the
+  // corrected set so they approve what they actually saw — not a silent change.
+  if (status === "awaiting_customer_approval") {
+    await sendDocsToCustomerCore(shipmentId, session.userId);
+  }
 
   revalidatePath(`/internal/shipments/${shipmentId}`);
   return ok;
