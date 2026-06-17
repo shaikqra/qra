@@ -48,5 +48,22 @@ export async function assessStatusAction(shipmentId: string, rawText: string): P
 
   const status = await assessShipmentStatus(rawText, freeDaysNote);
   if (!status) return { ok: false, error: "Couldn't read the update — paste the carrier's status text." };
+
+  // Persist so it surfaces to the exporter + survives a refresh. Stored under a
+  // reserved key (doc generators read named fields only — never leaks to a doc).
+  const { data: full } = await admin.from("shipments").select("extracted_data").eq("id", shipmentId).maybeSingle();
+  const ed = (full?.extracted_data ?? {}) as Record<string, string>;
+  await admin
+    .from("shipments")
+    .update({ extracted_data: { ...ed, _tracking: JSON.stringify(status) } })
+    .eq("id", shipmentId);
+  await admin.from("audit_operator_action").insert({
+    operator_id: session.userId,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "tracking_assessed" },
+  });
+
   return { ok: true, status };
 }

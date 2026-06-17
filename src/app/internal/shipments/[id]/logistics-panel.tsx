@@ -5,9 +5,15 @@ import { draftBookingAction } from "./logistics-actions";
 
 // Logistics agent — first capability: draft an inland booking request (truck /
 // container / CFS / VGM). The operator reviews and emails it. Draft only.
-export function LogisticsPanel({ shipmentId }: { shipmentId: string }) {
+export function LogisticsPanel({
+  shipmentId,
+  initial = null,
+}: {
+  shipmentId: string;
+  initial?: { subject: string; body: string } | null;
+}) {
   const [pending, start] = useTransition();
-  const [draft, setDraft] = useState<{ subject: string; body: string } | null>(null);
+  const [draft, setDraft] = useState<{ subject: string; body: string } | null>(initial);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 

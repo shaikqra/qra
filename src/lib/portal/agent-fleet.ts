@@ -50,7 +50,9 @@ const FLEET: Spec[] = [
 export function agentFleet(
   status: string,
   freight: { pending: boolean; awarded: boolean },
-  certs: { ready: boolean; count: number }
+  certs: { ready: boolean; count: number },
+  logistics: { ready: boolean },
+  tracking: { ready: boolean; summary: string }
 ): AgentCard[] {
   const idx = STAGE[status] ?? 0;
 
@@ -80,6 +82,16 @@ export function agentFleet(
         state: "done",
         note: `Listed ${certs.count} certificate${certs.count === 1 ? "" : "s"} you'll need`,
       };
+    }
+
+    // Logistics is live once a booking request has been drafted for this shipment.
+    if (a.key === "logistics" && logistics.ready) {
+      return { key: a.key, name: a.name, icon: a.icon, state: "done", note: "Booking requested" };
+    }
+
+    // Tracking is live once a carrier update has been read for this shipment.
+    if (a.key === "tracking" && tracking.ready) {
+      return { key: a.key, name: a.name, icon: a.icon, state: "working", note: tracking.summary || "Tracking your shipment" };
     }
 
     return { key: a.key, name: a.name, icon: a.icon, state: "later", note: a.note };

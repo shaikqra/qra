@@ -19,6 +19,7 @@ import { LiveRefresh } from "./live-refresh";
 import { CertList, type CertItem } from "./cert-list";
 import { documentProvenance } from "@/lib/provenance/fields";
 import { ProvenancePanel } from "./provenance-panel";
+import { TrackingCard, type Tracking } from "./tracking-card";
 
 export const dynamic = "force-dynamic";
 
@@ -143,11 +144,23 @@ export default async function PortalShipment({
     certItems = [];
   }
 
+  // Logistics + Tracking agent output (stored under reserved keys).
+  const bookingReady = !!f(ed, "_booking_draft");
+  let tracking: Tracking | null = null;
+  try {
+    const t = JSON.parse((f(ed, "_tracking") || "null"));
+    if (t && typeof t === "object") tracking = t as Tracking;
+  } catch {
+    tracking = null;
+  }
+
   // Agent cards: what the fleet is doing on this shipment, from real state.
   const fleet = agentFleet(
     ship.status,
     { pending: !rankedFreight.awarded && rankedFreight.ranked.length > 0, awarded: !!rankedFreight.awarded },
-    { ready: certItems.length > 0, count: certItems.length }
+    { ready: certItems.length > 0, count: certItems.length },
+    { ready: bookingReady },
+    { ready: !!tracking, summary: tracking?.summary ?? "" }
   );
 
   // Poll for live agent-card updates only while an agent is actively working (the
@@ -245,6 +258,8 @@ export default async function PortalShipment({
         reason={rankedFreight.reason}
         autoOpen={!statusGateActive}
       />
+
+      <TrackingCard tracking={tracking} />
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Documents</h2>

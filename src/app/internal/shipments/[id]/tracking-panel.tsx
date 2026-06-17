@@ -6,10 +6,16 @@ import type { ShipmentStatus } from "@/lib/ai/tracking-agent";
 
 // Tracking agent — read a carrier status update into a clean status + ETA, with a
 // demurrage-risk flag. Advisory; reads, never acts. Operator-side for now.
-export function TrackingPanel({ shipmentId }: { shipmentId: string }) {
+export function TrackingPanel({
+  shipmentId,
+  initial = null,
+}: {
+  shipmentId: string;
+  initial?: ShipmentStatus | null;
+}) {
   const [pending, start] = useTransition();
   const [raw, setRaw] = useState("");
-  const [status, setStatus] = useState<ShipmentStatus | null>(null);
+  const [status, setStatus] = useState<ShipmentStatus | null>(initial);
   const [error, setError] = useState<string | null>(null);
 
   function run() {

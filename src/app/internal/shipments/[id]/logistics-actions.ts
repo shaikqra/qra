@@ -57,5 +57,19 @@ export async function draftBookingAction(shipmentId: string): Promise<BookingRes
     carrier: ((awarded?.carrier_name as string) ?? "").trim(),
   });
   if (!draft) return { ok: false, error: "Couldn't draft the booking — add a product description first." };
+
+  // Persist the draft so it survives a refresh and the fleet card reflects it.
+  await admin
+    .from("shipments")
+    .update({ extracted_data: { ...d, _booking_draft: JSON.stringify(draft) } })
+    .eq("id", shipmentId);
+  await admin.from("audit_operator_action").insert({
+    operator_id: session.userId,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "booking_drafted" },
+  });
+
   return { ok: true, draft };
 }

@@ -83,6 +83,25 @@ export default async function ShipmentDetailPage({
   if (!shipment) notFound();
   const ship = shipment as Shipment;
 
+  // Persisted Logistics / Tracking agent output (reserved keys) — show on reload.
+  const edx = (ship.extracted_data ?? {}) as Record<string, string>;
+  const bookingInit = (() => {
+    try {
+      const v = JSON.parse(edx["_booking_draft"] || "null");
+      return v && v.subject ? v : null;
+    } catch {
+      return null;
+    }
+  })();
+  const trackingInit = (() => {
+    try {
+      const v = JSON.parse(edx["_tracking"] || "null");
+      return v && v.summary ? v : null;
+    } catch {
+      return null;
+    }
+  })();
+
   const { data: ingestRows } = await supabase
     .from("audit_po_ingest")
     .select("id, storage_path, file_sha256, source, created_at")
@@ -295,7 +314,7 @@ export default async function ShipmentDetailPage({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
           Logistics
         </h2>
-        <LogisticsPanel shipmentId={ship.id} />
+        <LogisticsPanel shipmentId={ship.id} initial={bookingInit} />
       </section>
 
       <section>
@@ -316,7 +335,7 @@ export default async function ShipmentDetailPage({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
           Tracking
         </h2>
-        <TrackingPanel shipmentId={ship.id} />
+        <TrackingPanel shipmentId={ship.id} initial={trackingInit} />
       </section>
 
       <section>
