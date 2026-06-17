@@ -29,6 +29,7 @@ const STATUS_ACTIVITY: Record<string, { icon: string; text: string; tone: string
   bucket_b_review: { icon: "👀", text: "Flagged for your review", tone: "text-indigo-700" },
   sanctions_screening: { icon: "🛑", text: "Held for sanctions review", tone: "text-orange-700" },
   awaiting_customer_approval: { icon: "📲", text: "Sent the documents to the customer for approval", tone: "text-blue-700" },
+  awaiting_goods_ready: { icon: "📦", text: "Documents approved — waiting for goods to be confirmed ready", tone: "text-amber-700" },
   customer_approved: { icon: "✅", text: "Customer approved the documents", tone: "text-green-700" },
   filed_with_cha: { icon: "📧", text: "Emailed the documents to the customs broker", tone: "text-teal-700" },
   customs_cleared: { icon: "🛃", text: "Customs cleared", tone: "text-emerald-700" },
@@ -69,6 +70,8 @@ function noteActivity(
       return { icon: "👀", text: "Some details needed checking — flagged for your review", tone: "text-indigo-700" };
     case "auto_pipeline_error":
       return { icon: "🛠️", text: "Couldn't read this PO automatically — our team is reviewing it", tone: "text-indigo-700" };
+    case "goods_ready_confirmed":
+      return { icon: "🚚", text: "Confirmed the goods are ready to ship", tone: "text-green-700", actor: "Customer" };
     case "customer_verify_requested":
       return { icon: "📋", text: "Asked the customer to confirm a few details", tone: "text-amber-700" };
     case "freight_rfq_sent":

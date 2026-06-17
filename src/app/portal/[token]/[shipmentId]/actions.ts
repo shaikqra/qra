@@ -5,12 +5,11 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalWriteRateLimited } from "@/lib/portal/auth";
 import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline";
-import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
+import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
 import { generateProformaInvoiceCore, generateCertificateOfOriginCore } from "@/lib/docs/generate";
 import { validateExtracted } from "@/lib/docs/validate";
 import { readDraftedFields, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
-import { isAutoSendChaEnabled } from "@/lib/app-settings";
 import { negotiateTargetFor } from "@/lib/freight/rank-quotes";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -224,9 +223,12 @@ export async function portalApproveDocs(token: string, shipmentId: string): Prom
   // Claim the status transition FIRST — this is the idempotency guard. A second
   // tap (or a crash mid-approve) finds zero rows here and exits cleanly, instead
   // of dead-ending the exporter on the most important button in the product.
+  // Approval moves to the G3 goods-ready gate (not straight to the CHA): docs are
+  // approved + locked, but the pack only goes to the broker once the exporter
+  // confirms the goods are ready to ship.
   const { data: claimed } = await admin
     .from("shipments")
-    .update({ status: "customer_approved" })
+    .update({ status: "awaiting_goods_ready" })
     .eq("id", shipmentId)
     .eq("status", "awaiting_customer_approval")
     .select("id");
@@ -251,27 +253,56 @@ export async function portalApproveDocs(token: string, shipmentId: string): Prom
       via: "portal",
       approval_message: approvalMessage,
       documents_approved: approvedCount,
-      status_changed_to: "customer_approved",
+      status_changed_to: "awaiting_goods_ready",
     },
   });
 
-  // Mirror the WhatsApp approve reply, then hand off to the CHA in the background
-  // (only if the operator enabled auto-send).
+  // Approved + locked — now ask the G3 goods-ready question on WhatsApp too.
   after(async () => {
     await notifyCustomerWhatsApp(
       admin,
       auth.customerId,
-      `✅ Thank you! Your documents for ${auth.referenceNumber} are approved and locked. We'll send them to your customs broker and proceed with your shipment.`
+      `✅ Your documents for ${auth.referenceNumber} are approved and locked. One last step: when your goods are ready to ship, confirm it in your portal (or reply READY here) and we'll hand everything to your customs broker.`
     );
-    try {
-      if (!(await isAutoSendChaEnabled())) return;
-      const sent = await sendDocsToChaCore(shipmentId, null, "customer_approved");
-      const benign =
-        sent.ok || ["no_cha_email", "not_configured", "already_sent"].includes((sent as { reason?: string }).reason ?? "");
-      if (!benign) console.error("portal_auto_cha_send_failed", { shipmentId, reason: (sent as { reason?: string }).reason });
-    } catch (err) {
-      console.error("portal_auto_cha_send_threw", { shipmentId, name: err instanceof Error ? err.name : "unknown" });
-    }
+  });
+
+  revalidatePath(`/portal/${token}/${shipmentId}`);
+  return { ok: true };
+}
+
+// G3 — goods readiness (exporter-owned). The exporter confirms the goods are ready
+// to ship; only then is the approved pack handed to the CHA for filing. Claims
+// awaiting_goods_ready -> customer_approved (idempotent), then auto-hands-off to the
+// broker if the operator enabled it. Mirrors the WhatsApp READY path.
+export async function portalConfirmGoodsReady(token: string, shipmentId: string): Promise<Result> {
+  if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const auth = await authorize(token, shipmentId, "awaiting_goods_ready");
+  if (!auth) return { ok: false, error: "This can't be confirmed right now." };
+
+  const admin = createSupabaseServerClient();
+  const { data: claimed } = await admin
+    .from("shipments")
+    .update({ status: "customer_approved" })
+    .eq("id", shipmentId)
+    .eq("status", "awaiting_goods_ready")
+    .select("id");
+  if (!claimed || claimed.length === 0) return { ok: true }; // already moving
+
+  await admin.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: { status: "awaiting_goods_ready" },
+    new_value: { event: "goods_ready_confirmed", confirmed_by: "customer", via: "portal" },
+  });
+
+  after(async () => {
+    await notifyCustomerWhatsApp(
+      admin,
+      auth.customerId,
+      `🚚 Thanks — goods marked ready for ${auth.referenceNumber}. We're handing your documents to your customs broker now.`
+    );
+    await autoSendChaIfEnabled(shipmentId, "customer_approved");
   });
 
   revalidatePath(`/portal/${token}/${shipmentId}`);

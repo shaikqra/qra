@@ -26,6 +26,7 @@ export function portalStageIndex(status: string): number {
     case "bucket_b_review":
       return 1;
     case "awaiting_customer_approval":
+    case "awaiting_goods_ready":
       return 2;
     case "customer_approved":
     case "filed_with_cha":
@@ -57,6 +58,8 @@ export function portalActionHint(status: string): string | null {
       return "Please check a couple of details — confirm below, or reply on WhatsApp to correct.";
     case "awaiting_customer_approval":
       return "Your documents are ready to review and approve.";
+    case "awaiting_goods_ready":
+      return "Confirm your goods are ready to ship — we'll then send everything to your CHA.";
     default:
       return null;
   }

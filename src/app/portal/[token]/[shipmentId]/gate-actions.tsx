@@ -8,6 +8,7 @@ import {
   portalApproveDocs,
   portalCloseShipment,
   portalVerifyOrder,
+  portalConfirmGoodsReady,
 } from "./actions";
 
 const CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered"];
@@ -15,7 +16,7 @@ const CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered
 type Result = { ok: true } | { ok: false; error: string };
 type VerifyField = { key: string; label: string; value: string; drafted: boolean };
 type Gate = {
-  kind: "confirm" | "verify" | "approve" | "close" | "info";
+  kind: "confirm" | "verify" | "approve" | "goods" | "close" | "info";
   title: string;
   subtitle: string;
 };
@@ -38,6 +39,13 @@ function gateFor(status: string, infoHint: string | null): Gate | null {
       kind: "approve",
       title: "Approve your documents",
       subtitle: "Review the documents below, then approve to send them to your CHA.",
+    };
+  if (status === "awaiting_goods_ready")
+    return {
+      kind: "goods",
+      title: "Are your goods ready to ship?",
+      subtitle:
+        "Your documents are approved. Confirm your goods are ready, and we'll send the pack to your CHA for filing.",
     };
   if (status === "awaiting_customer_info" && infoHint)
     return { kind: "info", title: "A few more details needed", subtitle: infoHint };
@@ -106,6 +114,7 @@ export function GateActions({
     confirm: "bg-emerald-600 hover:bg-emerald-700",
     verify: "bg-amber-600 hover:bg-amber-700",
     approve: "bg-emerald-600 hover:bg-emerald-700",
+    goods: "bg-emerald-600 hover:bg-emerald-700",
     close: "bg-emerald-600 hover:bg-emerald-700",
     info: "bg-sky-600 hover:bg-sky-700",
   }[gate.kind];
@@ -113,6 +122,7 @@ export function GateActions({
     confirm: "border-emerald-500",
     verify: "border-amber-500",
     approve: "border-emerald-500",
+    goods: "border-emerald-500",
     close: "border-emerald-500",
     info: "border-sky-500",
   }[gate.kind];
@@ -216,6 +226,23 @@ export function GateActions({
                     className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
                   >
                     Review first
+                  </button>
+                </>
+              )}
+              {gate.kind === "goods" && (
+                <>
+                  <button
+                    disabled={pending}
+                    onClick={() => run(() => portalConfirmGoodsReady(token, shipmentId))}
+                    className={`flex-1 rounded-lg ${accentBtn} px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60`}
+                  >
+                    {pending ? "Working…" : "Yes, ready to ship"}
+                  </button>
+                  <button
+                    onClick={() => setOpen(false)}
+                    className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                  >
+                    Not yet
                   </button>
                 </>
               )}

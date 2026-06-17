@@ -142,6 +142,7 @@ export default async function PortalShipment({
     "awaiting_order_confirm",
     "awaiting_customer_verify",
     "awaiting_customer_approval",
+    "awaiting_goods_ready",
     "awaiting_customer_info",
     "filed_with_cha",
     "customs_cleared",

@@ -20,8 +20,7 @@ import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/scr
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import { generateCoreDocSet } from "@/lib/docs/generate";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
-import { sendDocsToChaCore } from "@/lib/docs/send-to-cha-core";
-import { isAutoSendChaEnabled } from "@/lib/app-settings";
+import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
 import { createInvite } from "@/lib/onboarding";
 
 export const runtime = "nodejs";
@@ -414,11 +413,12 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
       return `Thanks! We're just finalizing the documents for ${ref} — give us a moment and we'll confirm shortly.`;
     }
 
-    // Move the shipment to 'customer_approved' so the board reflects it.
+    // Approval moves to the G3 goods-ready gate — docs approved + locked, but the
+    // pack only goes to the CHA once the exporter confirms the goods are ready.
     // Guarded on the current status so a stale/duplicate reply can't clobber it.
     await supabase
       .from("shipments")
-      .update({ status: "customer_approved" })
+      .update({ status: "awaiting_goods_ready" })
       .eq("id", shipmentId)
       .eq("status", "awaiting_customer_approval");
 
@@ -431,42 +431,13 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
         approved_by: "customer",
         approval_message: message,
         documents_approved: approvedCount,
-        status_changed_to: "customer_approved",
+        status_changed_to: "awaiting_goods_ready",
       },
     });
 
     console.log("customer_approval_recorded", { shipmentId, approvedCount });
 
-    // Agentic handoff: the customer's approval authorises sending the set to
-    // their customs broker. Done in the background so the reply is instant; if
-    // no CHA email is set (or the send fails) the shipment stays at
-    // customer_approved for the operator to handle. The CHA is the next gate.
-    after(async () => {
-      try {
-        // Pilot mode (default): the operator reviews and sends to the CHA.
-        // Auto mode (operator-enabled in Settings): hand off automatically.
-        if (!(await isAutoSendChaEnabled())) return;
-        // requireStatus claims customer_approved -> filed_with_cha so the CHA
-        // is emailed exactly once even on a retry.
-        const sent = await sendDocsToChaCore(shipmentId, null, "customer_approved");
-        const benign = sent.ok || ["no_cha_email", "not_configured", "already_sent"].includes(
-          (sent as { reason?: string }).reason ?? ""
-        );
-        if (!benign) {
-          console.error("auto_cha_send_failed", {
-            shipmentId,
-            reason: (sent as { reason?: string }).reason,
-          });
-        }
-      } catch (err) {
-        console.error("auto_cha_send_threw", {
-          shipmentId,
-          name: err instanceof Error ? err.name : "unknown",
-        });
-      }
-    });
-
-    return `✅ Thank you! Your documents for ${ref} are approved and locked. We'll send them to your customs broker and proceed with your shipment.`;
+    return `✅ Your documents for ${ref} are approved and locked. One last step: reply READY when your goods are ready to ship, and we'll hand everything to your customs broker.`;
   }
 
   // Maybe they're adding the OPTIONAL packing details (not an approval, not a
@@ -738,11 +709,62 @@ async function newestAffirmativeGate(customerId: string): Promise<string | null>
     .from("shipments")
     .select("status")
     .eq("customer_id", customerId)
-    .in("status", ["awaiting_customer_approval", "awaiting_order_confirm", "awaiting_customer_verify"])
+    .in("status", [
+      "awaiting_customer_approval",
+      "awaiting_order_confirm",
+      "awaiting_customer_verify",
+      "awaiting_goods_ready",
+    ])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   return (data?.status as string) ?? null;
+}
+
+// A shipment parked at awaiting_goods_ready (G3) waits for the exporter to confirm
+// the goods are ready to ship — only then is the approved pack handed to the CHA.
+// Fires on a READY / affirmative reply; other text falls through. Never logs the
+// body (PII). Returns a reply when handled, or null.
+async function handleGoodsReadyReply(customerId: string, body: string): Promise<string | null> {
+  const supabase = createSupabaseServerClient();
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, reference_number")
+    .eq("customer_id", customerId)
+    .eq("status", "awaiting_goods_ready")
+    .order("reference_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!shipment) return null;
+
+  // Only a clear readiness signal advances it.
+  if (!/\bready\b/i.test(body) && !isApprovalMessage(body)) return null;
+
+  const shipmentId = shipment.id as string;
+  const ref = shipment.reference_number as string;
+
+  const { data: claimed } = await supabase
+    .from("shipments")
+    .update({ status: "customer_approved" })
+    .eq("id", shipmentId)
+    .eq("status", "awaiting_goods_ready")
+    .select("id");
+  if (!claimed || claimed.length === 0) return null; // already moving
+
+  await supabase.from("audit_operator_action").insert({
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: { status: "awaiting_goods_ready" },
+    new_value: { event: "goods_ready_confirmed", confirmed_by: "customer", via: "whatsapp" },
+  });
+
+  // Now the approved pack goes to the CHA (if the operator enabled auto-send).
+  after(async () => {
+    await autoSendChaIfEnabled(shipmentId, "customer_approved");
+  });
+
+  return `🚚 Thanks — goods marked ready for ${ref}. We're handing your documents to your customs broker now.`;
 }
 
 // A shipment parked at awaiting_customer_verify is waiting for the EXPORTER to
@@ -1067,10 +1089,12 @@ export async function POST(req: NextRequest) {
       // which to try first when several are pending at once.
       const affirmativeHandlers =
         gate === "awaiting_customer_verify"
-          ? [handleVerifyReply, handleApprovalReply, handleOrderConfirmReply]
+          ? [handleVerifyReply, handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply]
           : gate === "awaiting_order_confirm"
-            ? [handleOrderConfirmReply, handleApprovalReply, handleVerifyReply]
-            : [handleApprovalReply, handleOrderConfirmReply, handleVerifyReply];
+            ? [handleOrderConfirmReply, handleGoodsReadyReply, handleApprovalReply, handleVerifyReply]
+            : gate === "awaiting_goods_ready"
+              ? [handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply, handleVerifyReply]
+              : [handleApprovalReply, handleGoodsReadyReply, handleOrderConfirmReply, handleVerifyReply];
       for (const handler of affirmativeHandlers) {
         const reply = await handler(customerId, body);
         if (reply) return twimlResponse(reply);
@@ -1079,13 +1103,15 @@ export async function POST(req: NextRequest) {
       if (gapFillReply) return twimlResponse(gapFillReply);
     } else {
       // Other text is most likely a gap-fill answer, then a verify-gate
-      // correction, then a change request on a doc awaiting approval.
-      // Order-confirm runs LAST so a bare "no" answering one shipment's question
-      // can't accidentally cancel a different parked order.
+      // correction, then a goods-ready signal, then a change request on a doc
+      // awaiting approval. Order-confirm runs LAST so a bare "no" answering one
+      // shipment's question can't accidentally cancel a different parked order.
       const gapFillReply = await handleGapFillReply(customerId, body);
       if (gapFillReply) return twimlResponse(gapFillReply);
       const verifyReply = await handleVerifyReply(customerId, body);
       if (verifyReply) return twimlResponse(verifyReply);
+      const goodsReadyReply = await handleGoodsReadyReply(customerId, body);
+      if (goodsReadyReply) return twimlResponse(goodsReadyReply);
       const approvalReply = await handleApprovalReply(customerId, body);
       if (approvalReply) return twimlResponse(approvalReply);
       const confirmReply = await handleOrderConfirmReply(customerId, body);

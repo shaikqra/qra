@@ -19,6 +19,7 @@ const STAGE: Record<string, number> = {
   generating_documents: 4,
   bucket_b_review: 4,
   awaiting_customer_approval: 5,
+  awaiting_goods_ready: 5,
   customer_approved: 6,
   filed_with_cha: 7,
   customs_cleared: 8,

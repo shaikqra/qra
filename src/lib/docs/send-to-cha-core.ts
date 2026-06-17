@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveChaEmail } from "@/lib/cha-contacts";
+import { isAutoSendChaEnabled } from "@/lib/app-settings";
 
 export type ChaSendResult =
   | { ok: true; sent: number }
@@ -170,4 +171,22 @@ export async function sendDocsToChaCore(
   if (auditErr) console.error("cha_send_audit_write_failed", { shipmentId });
 
   return { ok: true, sent: attachments.length };
+}
+
+// Shared post-gate hand-off: once the exporter clears the goods-ready gate (G3),
+// email the CHA exactly once — but ONLY if the operator enabled auto-send.
+// requireStatus atomically claims the transition to filed_with_cha. Benign
+// reasons (no CHA email yet, not configured, already sent) are not errors — the
+// operator picks those up. Used by both the portal and WhatsApp goods-ready paths.
+export async function autoSendChaIfEnabled(shipmentId: string, requireStatus: string): Promise<void> {
+  try {
+    if (!(await isAutoSendChaEnabled())) return;
+    const sent = await sendDocsToChaCore(shipmentId, null, requireStatus);
+    const benign =
+      sent.ok ||
+      ["no_cha_email", "not_configured", "already_sent"].includes((sent as { reason?: string }).reason ?? "");
+    if (!benign) console.error("auto_cha_send_failed", { shipmentId, reason: (sent as { reason?: string }).reason });
+  } catch (err) {
+    console.error("auto_cha_send_threw", { shipmentId, name: err instanceof Error ? err.name : "unknown" });
+  }
 }
