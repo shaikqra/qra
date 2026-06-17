@@ -379,8 +379,10 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
     .select("id, reference_number, status, extracted_data")
     .eq("customer_id", customerId)
     .eq("status", "awaiting_customer_approval")
-    // Order by reference_number (SHP-YYYYMMDD-xxxx) — a column we know exists.
-    // Newest reference sorts first; normally there's only one pending anyway.
+    // When a customer has several pending shipments, a reply with no id is most
+    // likely about the one we MOST RECENTLY touched — route by updated_at, with
+    // reference_number (SHP-YYYYMMDD-xxxx) as a stable tiebreaker.
+    .order("updated_at", { ascending: false })
     .order("reference_number", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -595,6 +597,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
     .select("id, reference_number, status, extracted_data")
     .eq("customer_id", customerId)
     .eq("status", "awaiting_customer_info")
+    .order("updated_at", { ascending: false })
     .order("reference_number", { ascending: false })
     .limit(10);
 
@@ -715,6 +718,8 @@ async function newestAffirmativeGate(customerId: string): Promise<string | null>
       "awaiting_customer_verify",
       "awaiting_goods_ready",
     ])
+    // Most recently touched gate = the one the customer most likely just answered.
+    .order("updated_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -732,6 +737,7 @@ async function handleGoodsReadyReply(customerId: string, body: string): Promise<
     .select("id, reference_number")
     .eq("customer_id", customerId)
     .eq("status", "awaiting_goods_ready")
+    .order("updated_at", { ascending: false })
     .order("reference_number", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -780,6 +786,7 @@ async function handleVerifyReply(customerId: string, body: string): Promise<stri
     .select("id, reference_number, extracted_data")
     .eq("customer_id", customerId)
     .eq("status", "awaiting_customer_verify")
+    .order("updated_at", { ascending: false })
     .order("reference_number", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -840,6 +847,7 @@ async function handleOrderConfirmReply(customerId: string, body: string): Promis
     .select("id, reference_number")
     .eq("customer_id", customerId)
     .eq("status", "awaiting_order_confirm")
+    .order("updated_at", { ascending: false })
     .order("reference_number", { ascending: false })
     .limit(1)
     .maybeSingle();
