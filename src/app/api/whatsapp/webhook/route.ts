@@ -16,11 +16,8 @@ import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
 import { computeProposedValue } from "@/lib/docs/compute-value";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { verifyAskMessage, verifyKeys, readStoredConfidence } from "@/lib/docs/verify-gate";
-import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import { generateCoreDocSet } from "@/lib/docs/generate";
-import { assessCertificationsCore } from "@/lib/certifications/assess";
-import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
 import { createInvite } from "@/lib/onboarding";
 
@@ -511,46 +508,18 @@ async function finishAndGenerate(
   opts: { fromStatus?: string; skipLowConfidence?: boolean } = {}
 ): Promise<string> {
   const fromStatus = opts.fromStatus ?? "awaiting_customer_info";
-  const issues = validateExtracted(merged);
-  // On a human-verified resume the exporter already confirmed the values, so
-  // skip the low-confidence check (it would bounce the gate forever).
-  const shaky = opts.skipLowConfidence
-    ? []
-    : lowConfidenceFields(merged, readStoredConfidence(merged));
 
-  // Data doubt → the EXPORTER verifies/corrects (blueprint G1), NOT the operator
-  // queue. Park at the verify gate and ask them on WhatsApp (the return value is
-  // the reply). Sanctions/compliance (below) is the only thing that goes to the
-  // operator.
-  if (issues.length > 0 || shaky.length > 0) {
-    await supabase
-      .from("shipments")
-      .update({ status: "awaiting_customer_verify" })
-      .eq("id", shipmentId)
-      .eq("status", fromStatus);
-    await supabase.from("audit_operator_action").insert({
-      operator_id: null,
-      shipment_id: shipmentId,
-      action_type: "note",
-      old_value: null,
-      new_value: { event: "customer_verify_requested", validation_issues: issues, low_confidence_fields: shaky },
-    });
-    return verifyAskMessage(ref, merged, issues, shaky);
-  }
+  // Persist the now-complete data, then re-run the FULL pipeline from it — so the
+  // HS auto-classify, the verify gate, sanctions screening, the certification agent
+  // and document generation ALL run. This used to be a hand-rolled copy of the
+  // pipeline's tail that drifted out of sync: it skipped the HS step entirely for
+  // gap-fill POs, silently costing the export declaration + shipping-bill checklist.
+  await supabase.from("shipments").update({ extracted_data: merged }).eq("id", shipmentId);
 
-  const screening = await screenShipmentParties(shipmentId, partiesFromExtracted(merged));
-  if (!screening.proceed) {
-    await supabase
-      .from("shipments")
-      .update({ status: "sanctions_screening" })
-      .eq("id", shipmentId)
-      .eq("status", fromStatus);
-    return `Thanks! I've noted the details for ${ref}. Our team is running final compliance checks and will send your documents shortly.`;
-  }
-
+  // Claim the transition once so two replies can't both kick off processing.
   const { data: claimed } = await supabase
     .from("shipments")
-    .update({ status: "generating_documents" })
+    .update({ status: "data_extracting" })
     .eq("id", shipmentId)
     .eq("status", fromStatus)
     .select("id");
@@ -558,34 +527,18 @@ async function finishAndGenerate(
     return `Thanks — I've got everything for ${ref} and I'm preparing your documents now.`;
   }
 
+  // skipLowConfidence flows through: the verify-correction caller passes true (the
+  // human already vouched, so don't re-flag), the gap-fill caller passes nothing →
+  // the full trust gate + HS step run.
   after(async () => {
-    const admin = createSupabaseServerClient();
-    const toOperatorQueue = async () => {
-      await admin
-        .from("shipments")
-        .update({ status: "bucket_b_review" })
-        .eq("id", shipmentId)
-        .eq("status", "generating_documents");
-    };
-    try {
-      try {
-        await assessCertificationsCore(shipmentId);
-      } catch (e) {
-        console.error("certs_assess_failed", { shipmentId, name: e instanceof Error ? e.name : "unknown" });
-      }
-      const docs = await generateCoreDocSet(shipmentId, null);
-      if (docs.essentialOk) {
-        const sendResult = await sendDocsToCustomerCore(shipmentId, null);
-        if (sendResult.ok) return;
-      }
-      await toOperatorQueue();
-    } catch (err) {
-      console.error("gap_fill_autosend_failed", { shipmentId, name: err instanceof Error ? err.name : "unknown" });
-      await toOperatorQueue();
-    }
+    await runAutoPipeline({
+      shipmentId,
+      extract: () => loadStoredExtraction(shipmentId),
+      skipLowConfidence: opts.skipLowConfidence,
+    });
   });
 
-  return `✅ That's everything for ${ref} — thank you! I'm preparing your draft documents now; they'll arrive in this chat in about a minute. Reply APPROVE once you've checked them.`;
+  return `✅ That's everything for ${ref} — thank you! I'm preparing your draft documents now; they'll arrive in this chat shortly. Reply APPROVE once you've checked them.`;
 }
 
 // If this customer has a shipment waiting on missing PO fields, parse their
