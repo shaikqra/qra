@@ -43,5 +43,12 @@ export async function checkRequiredCertsAction(shipmentId: string): Promise<Cert
 
   const certs = await requiredCertificates(g("product_description"), g("destination_country"), g("hs_code"));
   if (!certs) return { ok: false, error: "Couldn't check certificates — add a product description first." };
+
+  // Persist so the exporter sees it too (same store the auto-run agent uses).
+  await admin
+    .from("shipments")
+    .update({ extracted_data: { ...d, _certifications: JSON.stringify(certs) } })
+    .eq("id", shipmentId);
+
   return { ok: true, certs };
 }

@@ -72,6 +72,8 @@ function noteActivity(
       return { icon: "🛠️", text: "Couldn't read this PO automatically — our team is reviewing it", tone: "text-indigo-700" };
     case "goods_ready_confirmed":
       return { icon: "🚚", text: "Confirmed the goods are ready to ship", tone: "text-green-700", actor: "Customer" };
+    case "certificates_assessed":
+      return { icon: "📜", text: "Listed the certificates this shipment needs", tone: "text-zinc-700" };
     case "customer_verify_requested":
       return { icon: "📋", text: "Asked the customer to confirm a few details", tone: "text-amber-700" };
     case "freight_rfq_sent":

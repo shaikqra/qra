@@ -16,6 +16,7 @@ import { OptionalDocs } from "./optional-docs";
 import { agentFleet } from "@/lib/portal/agent-fleet";
 import { AgentFleet } from "./agent-fleet";
 import { LiveRefresh } from "./live-refresh";
+import { CertList, type CertItem } from "./cert-list";
 
 export const dynamic = "force-dynamic";
 
@@ -120,11 +121,21 @@ export default async function PortalShipment({
   // Freight quotes for the G4 gate (shipment already verified as this customer's).
   const rankedFreight = await loadRankedFreight(admin, shipmentId);
 
+  // Certification agent output (advisory list, stored under the reserved key).
+  let certItems: CertItem[] = [];
+  try {
+    const parsed = JSON.parse(((ed?.["_certifications"] as string) ?? "[]"));
+    if (Array.isArray(parsed)) certItems = parsed as CertItem[];
+  } catch {
+    certItems = [];
+  }
+
   // Agent cards: what the fleet is doing on this shipment, from real state.
-  const fleet = agentFleet(ship.status, {
-    pending: !rankedFreight.awarded && rankedFreight.ranked.length > 0,
-    awarded: !!rankedFreight.awarded,
-  });
+  const fleet = agentFleet(
+    ship.status,
+    { pending: !rankedFreight.awarded && rankedFreight.ranked.length > 0, awarded: !!rankedFreight.awarded },
+    { ready: certItems.length > 0, count: certItems.length }
+  );
 
   // Poll for live agent-card updates only while an agent is actively working (the
   // status will change on its own). At a waiting gate or a terminal state the next
@@ -249,6 +260,8 @@ export default async function PortalShipment({
           </div>
         )}
       </section>
+
+      <CertList items={certItems} />
 
       {activities.length > 0 && (
         <section>

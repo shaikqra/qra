@@ -49,7 +49,8 @@ const FLEET: Spec[] = [
 
 export function agentFleet(
   status: string,
-  freight: { pending: boolean; awarded: boolean }
+  freight: { pending: boolean; awarded: boolean },
+  certs: { ready: boolean; count: number }
 ): AgentCard[] {
   const idx = STAGE[status] ?? 0;
 
@@ -68,6 +69,17 @@ export function agentFleet(
     if (a.key === "freight") {
       if (freight.awarded) return { key: a.key, name: a.name, icon: a.icon, state: "done", note: "Carrier awarded" };
       if (freight.pending) return { key: a.key, name: a.name, icon: a.icon, state: "working", note: "Quotes ready — needs your decision" };
+    }
+
+    // Certification shows REAL state once the agent has listed this shipment's certs.
+    if (a.key === "certification" && certs.ready) {
+      return {
+        key: a.key,
+        name: a.name,
+        icon: a.icon,
+        state: "done",
+        note: `Listed ${certs.count} certificate${certs.count === 1 ? "" : "s"} you'll need`,
+      };
     }
 
     return { key: a.key, name: a.name, icon: a.icon, state: "later", note: a.note };

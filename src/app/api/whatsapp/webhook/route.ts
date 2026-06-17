@@ -19,6 +19,7 @@ import { verifyAskMessage, flaggedFieldKeys, readStoredConfidence } from "@/lib/
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import { generateCoreDocSet } from "@/lib/docs/generate";
+import { assessCertificationsCore } from "@/lib/certifications/assess";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
 import { createInvite } from "@/lib/onboarding";
@@ -567,6 +568,11 @@ async function finishAndGenerate(
         .eq("status", "generating_documents");
     };
     try {
+      try {
+        await assessCertificationsCore(shipmentId);
+      } catch (e) {
+        console.error("certs_assess_failed", { shipmentId, name: e instanceof Error ? e.name : "unknown" });
+      }
       const docs = await generateCoreDocSet(shipmentId, null);
       if (docs.essentialOk) {
         const sendResult = await sendDocsToCustomerCore(shipmentId, null);

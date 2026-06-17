@@ -8,6 +8,7 @@ import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { verifyAskMessage } from "@/lib/docs/verify-gate";
 import { classifyHsCode } from "@/lib/ai/classify-hs";
+import { assessCertificationsCore } from "@/lib/certifications/assess";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
 
 // A one-line, human-readable summary of the drafted order for the confirm ask.
@@ -334,6 +335,17 @@ export async function runAutoPipeline(args: {
     }
 
     await setStatus("generating_documents");
+
+    // Certification agent (advisory): list the certificates this product +
+    // destination needs and store them for the exporter. Never blocks documents.
+    try {
+      await assessCertificationsCore(args.shipmentId);
+    } catch (e) {
+      console.error("certs_assess_failed", {
+        shipmentId: args.shipmentId,
+        name: e instanceof Error ? e.name : "unknown",
+      });
+    }
 
     // Draft the core set: commercial invoice + packing list (always), plus the
     // export declaration + shipping-bill data sheet when HS/destination are
