@@ -139,7 +139,19 @@ export default async function PortalShipment({
   let certItems: CertItem[] = [];
   try {
     const parsed = JSON.parse(((ed?.["_certifications"] as string) ?? "[]"));
-    if (Array.isArray(parsed)) certItems = parsed as CertItem[];
+    if (Array.isArray(parsed)) {
+      // Source is agent / Trade-Graph output — validate each entry rather than
+      // trusting the cast: keep only objects, coerce fields to strings, and drop
+      // anything without a name so a malformed item can't render garbage.
+      certItems = parsed
+        .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+        .map((c) => ({
+          name: typeof c.name === "string" ? c.name : "",
+          note: typeof c.note === "string" ? c.note : "",
+          issuedBy: typeof c.issuedBy === "string" ? c.issuedBy : "",
+        }))
+        .filter((c) => c.name);
+    }
   } catch {
     certItems = [];
   }

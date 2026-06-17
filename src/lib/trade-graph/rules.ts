@@ -110,5 +110,13 @@ export async function storeDraftRule(ruleType: string, lane: string, payload: un
     .limit(1)
     .maybeSingle();
   if (existing) return;
-  await admin.from("trade_graph_rules").insert({ rule_type: ruleType, lane_key: lane, payload, status: "draft" });
+  const { error } = await admin
+    .from("trade_graph_rules")
+    .insert({ rule_type: ruleType, lane_key: lane, payload, status: "draft" });
+  // A unique violation (23505) means a concurrent run already drafted this exact
+  // lane — that's the outcome we want (one draft per lane), so ignore it. Any
+  // other error is real and worth a (PII-free) log.
+  if (error && error.code !== "23505") {
+    console.error("store_draft_rule_failed", { code: error.code });
+  }
 }

@@ -86,8 +86,17 @@ export async function runAutoPipeline(args: {
     });
   };
 
-  let lastStatus = "po_received";
+  // Seed from the shipment's REAL current status so a resume (the caller already
+  // moved it past po_received before re-running the pipeline) doesn't write a
+  // fictional "from po_received" transition into the audit trail.
+  const { data: startRow } = await admin
+    .from("shipments")
+    .select("status")
+    .eq("id", args.shipmentId)
+    .maybeSingle();
+  let lastStatus = (startRow?.status as string) ?? "po_received";
   const setStatus = async (status: string) => {
+    if (status === lastStatus) return; // no-op transition — nothing to record
     await admin.from("shipments").update({ status }).eq("id", args.shipmentId);
     await audit("status_change", { status: lastStatus }, { status });
     lastStatus = status;
