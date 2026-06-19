@@ -50,11 +50,52 @@ function exporterActor(a: "Qra" | "You" | "Customer"): string {
   return a === "Customer" ? "You" : "Qra";
 }
 
+const BRAND = "#3f5bd9";
+
+const STATUS_STYLE: Record<string, { label: string; cls: string; live?: boolean }> = {
+  po_received: { label: "Received", cls: "bg-amber-100 text-amber-800" },
+  data_extracting: { label: "Reading PO", cls: "bg-sky-100 text-sky-800", live: true },
+  awaiting_order_confirm: { label: "Confirm order", cls: "bg-violet-100 text-violet-800" },
+  awaiting_customer_info: { label: "Needs details", cls: "bg-amber-100 text-amber-800" },
+  awaiting_customer_verify: { label: "Check details", cls: "bg-amber-100 text-amber-800" },
+  generating_documents: { label: "Drafting docs", cls: "bg-violet-100 text-violet-800", live: true },
+  sanctions_screening: { label: "Screening", cls: "bg-orange-100 text-orange-800", live: true },
+  bucket_b_review: { label: "In review", cls: "bg-indigo-100 text-indigo-800" },
+  awaiting_customer_approval: { label: "Your approval", cls: "bg-blue-100 text-blue-800" },
+  awaiting_goods_ready: { label: "Goods ready?", cls: "bg-amber-100 text-amber-800" },
+  customer_approved: { label: "Sending to CHA", cls: "bg-emerald-100 text-emerald-800", live: true },
+  filed_with_cha: { label: "With your CHA", cls: "bg-teal-100 text-teal-800" },
+  customs_cleared: { label: "Customs cleared", cls: "bg-emerald-100 text-emerald-800" },
+  in_transit: { label: "In transit", cls: "bg-blue-100 text-blue-800" },
+  delivered: { label: "Delivered", cls: "bg-emerald-100 text-emerald-800" },
+  completed: { label: "Completed", cls: "bg-slate-200 text-slate-700" },
+  rejected: { label: "Rejected", cls: "bg-red-100 text-red-800" },
+  order_declined: { label: "Declined", cls: "bg-slate-200 text-slate-700" },
+};
+
+function StatusPill({ status }: { status: string }) {
+  const s = STATUS_STYLE[status] ?? { label: status.replace(/_/g, " "), cls: "bg-slate-100 text-slate-700" };
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${s.cls}`}>
+      {s.live && <span className="h-1.5 w-1.5 rounded-full bg-current animate-soft-pulse" />}
+      {s.label}
+    </span>
+  );
+}
+
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-3 text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: BRAND }}>
+      {children}
+    </div>
+  );
+}
+
 function Detail({ k, v }: { k: string; v: string }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{k}</div>
-      <div className="text-zinc-800">{v || "—"}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{k}</div>
+      <div className="text-slate-800">{v || "—"}</div>
     </div>
   );
 }
@@ -220,15 +261,6 @@ export default async function PortalShipment({
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <Link href={`/portal/${token}`} className="text-sm text-zinc-500 hover:text-zinc-900">
-          ← All shipments
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight mt-1 font-mono text-zinc-900">
-          {ship.reference_number}
-        </h1>
-      </div>
-
       <GateActions
         token={token}
         shipmentId={shipmentId}
@@ -238,94 +270,125 @@ export default async function PortalShipment({
         infoHint={ship.status === "awaiting_customer_info" ? hint : null}
       />
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Progress</h2>
-        <div className="rounded-xl border border-zinc-200 bg-white p-5">
-          <Timeline status={ship.status} />
+      {/* Top bar */}
+      <div className="animate-fade-in-up flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <Link href={`/portal/${token}`} className="text-sm text-slate-500 hover:text-slate-900">
+            ← All shipments
+          </Link>
+          <h1 className="mt-1 font-mono text-2xl font-semibold tracking-tight text-slate-900">
+            {ship.reference_number}
+          </h1>
         </div>
+        <StatusPill status={ship.status} />
+      </div>
+
+      {/* Progress */}
+      <section
+        className="animate-fade-in-up rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        style={{ animationDelay: "60ms" }}
+      >
+        <Timeline status={ship.status} />
       </section>
 
       <LiveRefresh active={liveActive} />
-      <AgentFleet cards={fleet} />
 
-      <PortalChat token={token} shipmentId={shipmentId} />
-
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Order</h2>
-        <div className="rounded-xl border border-zinc-200 bg-white p-5 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
-          <Detail k="Goods" v={f(ed, "product_description")} />
-          <Detail k="Quantity" v={`${f(ed, "quantity")} ${f(ed, "quantity_unit")}`.trim()} />
-          <Detail k="Buyer" v={f(ed, "buyer_name")} />
-          <Detail k="Value" v={`${f(ed, "value_currency")} ${f(ed, "value_amount")}`.trim()} />
-          <Detail k="Incoterm" v={f(ed, "incoterm")} />
-          <Detail k="Port of discharge" v={f(ed, "port_of_discharge")} />
-        </div>
-      </section>
-
-      <ProvenancePanel rows={provenance} />
-
-      <FreightGate
-        token={token}
-        shipmentId={shipmentId}
-        quotes={rankedFreight.ranked}
-        awarded={rankedFreight.awarded}
-        recommendationId={rankedFreight.recommendationId}
-        reason={rankedFreight.reason}
-        autoOpen={!statusGateActive}
-      />
-
-      <TrackingCard tracking={tracking} />
-
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Documents</h2>
-        {files.length === 0 ? (
-          <div className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500">
-            No documents ready yet — they&apos;ll appear here once Qra has prepared them.
+      {/* Cockpit: main column + sidebar */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="flex flex-col gap-6 lg:col-span-2">
+          <div className="animate-fade-in-up" style={{ animationDelay: "120ms" }}>
+            <PortalChat token={token} shipmentId={shipmentId} />
           </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {files.map((file) => (
-              <a
-                key={file.label}
-                href={file.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 hover:border-emerald-300 hover:bg-emerald-50"
-              >
-                <span className="text-lg">📄</span>
-                <span className="text-sm font-semibold text-emerald-800">{file.label}</span>
-                <span className="ml-auto text-xs font-semibold text-zinc-500">Open ↗</span>
-              </a>
-            ))}
-          </div>
-        )}
-        {portalStageIndex(ship.status) >= 2 && (
-          <div className="mt-3">
-            <OptionalDocs token={token} shipmentId={shipmentId} />
-          </div>
-        )}
-      </section>
 
-      <CertList items={certItems} source={f(ed, "_certifications_source")} citation={f(ed, "_certifications_citation")} />
-
-      {activities.length > 0 && (
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Activity</h2>
-          <div className="rounded-xl border border-zinc-200 bg-white p-5 flex flex-col gap-3">
-            {activities.map((a) => (
-              <div key={a.id} className="flex items-start gap-3">
-                <span className="text-base leading-none mt-0.5">{a.icon}</span>
-                <div>
-                  <div className={`text-sm ${a.tone}`}>{a.text}</div>
-                  <div className="text-[11px] text-zinc-400 mt-0.5">
-                    {exporterActor(a.actor)} · {new Date(a.created_at).toLocaleString()}
-                  </div>
-                </div>
+          <section className="animate-fade-in-up" style={{ animationDelay: "180ms" }}>
+            <Eyebrow>Documents</Eyebrow>
+            {files.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+                No documents ready yet — they&apos;ll appear here once Qra has prepared them.
               </div>
-            ))}
+            ) : (
+              <div className="flex flex-col gap-2">
+                {files.map((file) => (
+                  <a
+                    key={file.label}
+                    href={file.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 transition hover:-translate-y-0.5 hover:border-[#c7d2fe] hover:shadow-md"
+                  >
+                    <span className="text-lg">📄</span>
+                    <span className="text-sm font-semibold text-slate-800">{file.label}</span>
+                    <span className="ml-auto text-xs font-semibold" style={{ color: BRAND }}>
+                      Open ↗
+                    </span>
+                  </a>
+                ))}
+              </div>
+            )}
+            {portalStageIndex(ship.status) >= 2 && (
+              <div className="mt-3">
+                <OptionalDocs token={token} shipmentId={shipmentId} />
+              </div>
+            )}
+          </section>
+
+          <FreightGate
+            token={token}
+            shipmentId={shipmentId}
+            quotes={rankedFreight.ranked}
+            awarded={rankedFreight.awarded}
+            recommendationId={rankedFreight.recommendationId}
+            reason={rankedFreight.reason}
+            autoOpen={!statusGateActive}
+          />
+        </div>
+
+        <aside className="flex flex-col gap-6">
+          <section
+            className="animate-fade-in-up rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            style={{ animationDelay: "150ms" }}
+          >
+            <Eyebrow>Order</Eyebrow>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+              <Detail k="Goods" v={f(ed, "product_description")} />
+              <Detail k="Quantity" v={`${f(ed, "quantity")} ${f(ed, "quantity_unit")}`.trim()} />
+              <Detail k="Buyer" v={f(ed, "buyer_name")} />
+              <Detail k="Value" v={`${f(ed, "value_currency")} ${f(ed, "value_amount")}`.trim()} />
+              <Detail k="Incoterm" v={f(ed, "incoterm")} />
+              <Detail k="Destination" v={f(ed, "port_of_discharge")} />
+            </div>
+          </section>
+
+          <div className="animate-fade-in-up" style={{ animationDelay: "210ms" }}>
+            <AgentFleet cards={fleet} />
           </div>
-        </section>
-      )}
+
+          <CertList items={certItems} source={f(ed, "_certifications_source")} citation={f(ed, "_certifications_citation")} />
+
+          <TrackingCard tracking={tracking} />
+
+          <ProvenancePanel rows={provenance} />
+
+          {activities.length > 0 && (
+            <section>
+              <Eyebrow>Activity</Eyebrow>
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5">
+                {activities.map((a) => (
+                  <div key={a.id} className="flex items-start gap-3">
+                    <span className="mt-0.5 text-base leading-none">{a.icon}</span>
+                    <div>
+                      <div className={`text-sm ${a.tone}`}>{a.text}</div>
+                      <div className="mt-0.5 text-[11px] text-slate-400">
+                        {exporterActor(a.actor)} · {new Date(a.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
