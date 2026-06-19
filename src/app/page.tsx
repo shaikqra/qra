@@ -192,9 +192,21 @@ const FAQS = [
 ];
 
 // The real Qra mark, served from /public/logo.png (white background blends on
-// light surfaces; placed on a white tile on dark sections).
+// light surfaces; placed on a white tile on dark sections). The image is zoomed
+// slightly inside an overflow-hidden box to crop the file's white padding, so the
+// mark itself reads bigger at any given size.
 function Mark({ className = "" }: { className?: string }) {
-  return <Image src="/logo.png" alt="Qra logo" width={64} height={64} className={className} />;
+  return (
+    <span className={`inline-flex items-center justify-center overflow-hidden ${className}`}>
+      <Image
+        src="/logo.png"
+        alt="Qra logo"
+        width={80}
+        height={80}
+        className="h-full w-full scale-[1.18] object-cover"
+      />
+    </span>
+  );
 }
 
 function Eyebrow({ children, dark = false }: { children: React.ReactNode; dark?: boolean }) {
@@ -281,9 +293,9 @@ export default function Home() {
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-slate-100 bg-white/85 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <span className="inline-flex items-center gap-2">
-            <Mark className="h-8 w-8" />
-            <span className="text-lg font-semibold tracking-tight" style={{ color: NAVY }}>
+          <span className="inline-flex items-center gap-2.5">
+            <Mark className="h-11 w-11" />
+            <span className="text-2xl font-semibold tracking-tight" style={{ color: NAVY }}>
               Qra
             </span>
           </span>
@@ -644,7 +656,7 @@ export default function Home() {
       <footer className="border-t border-slate-100">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 text-sm text-slate-500 sm:flex-row">
           <span className="inline-flex items-center gap-2">
-            <Mark className="h-6 w-6" />
+            <Mark className="h-8 w-8" />
             <span className="font-semibold text-slate-700">Qra</span>
             <span className="text-slate-400">· the export OS</span>
           </span>
