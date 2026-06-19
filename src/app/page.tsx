@@ -139,14 +139,18 @@ const DOCS = [
   },
 ];
 
-// Agent fleet — kept deliberately high-level. We don't publish the full roster,
-// each agent's exact method, or what's on the roadmap.
+// Agent fleet — the full set, kept high-level. We deliberately don't publish each
+// agent's exact method or which are further along than others.
 const AGENTS = [
   { icon: "📥", name: "Reading", body: "Reads your PO and structures the order." },
   { icon: "🛡️", name: "Compliance", body: "Runs the screening and compliance checks." },
   { icon: "📜", name: "Certification", body: "Flags the certificates a shipment needs." },
   { icon: "📄", name: "Documents", body: "Drafts your consistent document set." },
   { icon: "📧", name: "Filing", body: "Prepares the pack for your customs broker." },
+  { icon: "🚢", name: "Freight", body: "Compares carrier options for your shipment." },
+  { icon: "📦", name: "Logistics", body: "Coordinates the inland moves to the port." },
+  { icon: "📡", name: "Tracking", body: "Keeps watch once the cargo is on its way." },
+  { icon: "💰", name: "Treasury", body: "Handles the steps that get you paid." },
 ];
 
 const ACTIVITY = [
@@ -511,8 +515,8 @@ export default function Home() {
             A team of agents, one for every step
           </h2>
           <p className="mt-3 max-w-2xl text-slate-600">
-            Qra runs your shipment as a team of specialist AI agents — each owns one step,
-            proposes its work, and a human approves at the gate.
+            Qra is built as a team of specialist AI agents spanning the whole export journey —
+            each owns one step, proposes its work, and a human approves at the gate.
           </p>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {AGENTS.map((a) => (
