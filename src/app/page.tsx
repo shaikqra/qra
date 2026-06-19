@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 // Where the email link points. Change to whichever inbox you want enquiries in.
 const CONTACT_EMAIL = "abdulalis@gmail.com";
@@ -126,19 +127,12 @@ const FAQS = [
   },
 ];
 
-// The Qra aperture mark, recreated as inline SVG so it stays crisp at any size and
-// inherits its colour from the surrounding text (currentColor). Drop a real logo
-// SVG into /public and swap this out if you'd rather use the exact artwork.
-function Mark({ className = "", style }: { className?: string; style?: React.CSSProperties }) {
+// The real Qra mark, served from /public/logo.png. The file has a white
+// background, so it sits invisibly on the white header/footer (showing just the
+// mark); on dark sections we place it on a white tile (see the final CTA).
+function Mark({ className = "" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 100 100" className={className} style={style} fill="none" aria-hidden="true">
-      <g stroke="currentColor" strokeWidth="9" strokeLinecap="round">
-        {[0, 60, 120, 180, 240, 300].map((a) => (
-          <path key={a} d="M50 50 Q 74 34 53 12" transform={`rotate(${a} 50 50)`} />
-        ))}
-      </g>
-      <circle cx="50" cy="50" r="6.5" fill="currentColor" />
-    </svg>
+    <Image src="/logo.png" alt="Qra logo" width={64} height={64} className={className} />
   );
 }
 
@@ -205,7 +199,7 @@ export default function Home() {
       <header className="border-b border-slate-100 sticky top-0 bg-white/90 backdrop-blur z-20">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <span className="inline-flex items-center gap-2">
-            <Mark className="h-7 w-7" style={{ color: BRAND }} />
+            <Mark className="h-8 w-8" />
             <span className="text-lg font-semibold tracking-tight" style={{ color: "#0b1e44" }}>
               Qra
             </span>
@@ -247,7 +241,6 @@ export default function Home() {
         <div className="max-w-6xl mx-auto px-6 pt-16 pb-20 sm:pt-24 grid lg:grid-cols-2 gap-12 items-center">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-[#aab9e0] mb-6">
-              <Mark className="h-3.5 w-3.5 text-[#8aa0ee]" />
               the export OS · built for Indian exporters
             </div>
             <h1 className="text-4xl sm:text-5xl xl:text-6xl font-semibold tracking-tight leading-[1.05]">
@@ -460,7 +453,9 @@ export default function Home() {
       {/* Final CTA — navy band */}
       <section className="text-white" style={{ backgroundColor: "#0b1e44" }}>
         <div className="max-w-6xl mx-auto px-6 py-20 text-center">
-          <Mark className="h-10 w-10 mx-auto mb-5 text-[#8aa0ee]" />
+          <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-lg">
+            <Mark className="h-12 w-12" />
+          </span>
           <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight">
             Try Qra on one real shipment
           </h2>
@@ -493,7 +488,7 @@ export default function Home() {
       <footer className="border-t border-slate-100">
         <div className="max-w-6xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-slate-500">
           <span className="inline-flex items-center gap-2">
-            <Mark className="h-5 w-5" style={{ color: BRAND }} />
+            <Mark className="h-6 w-6" />
             <span className="font-semibold text-slate-700">Qra</span>
             <span className="text-slate-400">· the export OS</span>
           </span>
