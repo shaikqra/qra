@@ -3,8 +3,7 @@ import { notFound } from "next/navigation";
 import { ensureCha } from "@/lib/supabase/cha-auth";
 import { createSupabaseAuthClient } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { ChaActions } from "./cha-actions";
-import { DocWorkspace } from "./doc-workspace";
+import { ChaReviewChat } from "./cha-review-chat";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +13,7 @@ const DOC_LABELS: Record<string, string> = {
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
   shipping_bill_pack: "Shipping Bill Data Sheet",
+  export_declaration: "Export Declaration",
 };
 
 type Shipment = {
@@ -35,8 +35,8 @@ function f(data: Record<string, unknown> | null, k: string): string {
 function Detail({ k, v }: { k: string; v: string }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{k}</div>
-      <div className="text-zinc-800">{v || "—"}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{k}</div>
+      <div className="text-slate-800">{v || "—"}</div>
     </div>
   );
 }
@@ -79,20 +79,17 @@ export default async function ChaShipmentPage({ params }: { params: Promise<{ id
     if (signed?.signedUrl) files.push({ label: DOC_LABELS[type] ?? type, url: signed.signedUrl });
   }
 
-  const filed = ship.cha_review_status === "filed";
-  const changes = ship.cha_review_status === "changes_requested";
-
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href="/cha" className="text-sm text-zinc-500 hover:text-zinc-900">
+        <Link href="/cha" className="text-sm text-slate-500 hover:text-slate-900">
           ← Your filing desk
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight mt-1 font-mono">{ship.reference_number}</h1>
-        <p className="text-sm text-zinc-500">{cust?.display_name?.trim() || "Exporter"}</p>
+        <p className="text-sm text-slate-500">{cust?.display_name?.trim() || "Exporter"}</p>
       </div>
 
-      <div className="rounded-xl border border-zinc-200 bg-white p-5 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+      <div className="rounded-xl border border-slate-200 bg-white p-5 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
         <Detail k="Goods" v={f(ed, "product_description")} />
         <Detail k="Quantity" v={`${f(ed, "quantity")} ${f(ed, "quantity_unit")}`.trim()} />
         <Detail k="Buyer" v={f(ed, "buyer_name")} />
@@ -101,31 +98,14 @@ export default async function ChaShipmentPage({ params }: { params: Promise<{ id
         <Detail k="Port of discharge" v={f(ed, "port_of_discharge")} />
       </div>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-          Documents
-        </h2>
-        <DocWorkspace files={files} shipmentId={ship.id} />
-      </section>
-
-      {filed ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-          ✓ You marked this <b>filed with customs</b>
-          {ship.cha_reviewed_at ? ` on ${new Date(ship.cha_reviewed_at).toLocaleDateString()}` : ""}.
-          {ship.cha_review_note && <div className="text-emerald-700 mt-1">Note: {ship.cha_review_note}</div>}
-        </div>
-      ) : (
-        <>
-          {changes && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              You requested changes
-              {ship.cha_review_note ? `: ${ship.cha_review_note}` : ""}. Recorded for the exporter to
-              revise — you can still file once it&apos;s fixed.
-            </div>
-          )}
-          <ChaActions shipmentId={ship.id} />
-        </>
-      )}
+      <ChaReviewChat
+        shipmentId={ship.id}
+        reference={ship.reference_number}
+        status={ship.status}
+        files={files}
+        reviewStatus={ship.cha_review_status}
+        reviewNote={ship.cha_review_note}
+      />
     </div>
   );
 }

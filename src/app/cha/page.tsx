@@ -46,27 +46,28 @@ function goodsLine(r: Row): string {
 }
 
 function Card({ r }: { r: Row }) {
-  const filed = r.cha_review_status === "filed";
-  const changes = r.cha_review_status === "changes_requested";
+  const status = r.cha_review_status;
   return (
     <Link
       href={`/cha/${r.id}`}
-      className="block rounded-xl border border-zinc-200 bg-white p-4 hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+      className="block rounded-xl border border-slate-200 bg-white p-4 hover:border-[#3f5bd9] hover:bg-[#eef1fc] transition-colors"
     >
       <div className="flex items-center gap-2">
-        <span className="font-mono text-xs font-bold text-zinc-900">{r.reference_number}</span>
-        <span className="text-sm font-semibold text-zinc-800">· {exporterName(r)}</span>
+        <span className="font-mono text-xs font-bold text-slate-900">{r.reference_number}</span>
+        <span className="text-sm font-semibold text-slate-800">· {exporterName(r)}</span>
         <span className="ml-auto text-xs font-semibold">
-          {filed ? (
+          {status === "filed" ? (
             <span className="text-emerald-600">✓ Filed</span>
-          ) : changes ? (
+          ) : status === "docs_approved" ? (
+            <span className="text-[#3f5bd9]">Approved · file →</span>
+          ) : status === "changes_requested" ? (
             <span className="text-amber-600">Changes requested</span>
           ) : (
-            <span className="text-emerald-700">Review →</span>
+            <span className="text-[#3f5bd9]">Review →</span>
           )}
         </span>
       </div>
-      <div className="text-sm text-zinc-500 mt-1">{goodsLine(r)}</div>
+      <div className="text-sm text-slate-500 mt-1">{goodsLine(r)}</div>
     </Link>
   );
 }
@@ -85,25 +86,27 @@ export default async function ChaHome() {
     .limit(200);
   const rows = (data ?? []) as unknown as Row[];
 
-  const todo = rows.filter((r) => r.cha_review_status == null);
-  const done = rows.filter((r) => r.cha_review_status != null);
+  // Until the broker has actually filed (G6), the shipment still needs them —
+  // including ones where they've approved the docs or asked for a change.
+  const todo = rows.filter((r) => r.cha_review_status !== "filed");
+  const done = rows.filter((r) => r.cha_review_status === "filed");
 
   return (
     <div className="flex flex-col gap-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Your filing desk</h1>
-        <p className="text-sm text-zinc-500 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           Exporter-approved document packs, ready for you to review and file. You file on ICEGATE
           with your own DSC — Qra never holds your signature.
         </p>
       </div>
 
       <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-          Needs your action {todo.length > 0 && <span className="text-emerald-600">· {todo.length}</span>}
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">
+          Needs your action {todo.length > 0 && <span className="text-[#3f5bd9]">· {todo.length}</span>}
         </h2>
         {todo.length === 0 ? (
-          <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500">
+          <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
             Nothing waiting on you right now.
           </div>
         ) : (
@@ -117,8 +120,8 @@ export default async function ChaHome() {
 
       {done.length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
-            Reviewed
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">
+            Filed
           </h2>
           <div className="flex flex-col gap-2">
             {done.map((r) => (
