@@ -333,18 +333,6 @@ export default function Home() {
             "radial-gradient(ellipse 90% 80% at 50% -10%, #18386f 0%, #0c2150 45%, #0a1a3d 100%)",
         }}
       >
-        <div
-          className="pointer-events-none absolute top-1/2 right-[2%] hidden h-[560px] w-[560px] -translate-y-1/2 rounded-full lg:block"
-          style={{ background: "radial-gradient(circle, rgba(74,108,224,0.28), transparent 62%)", filter: "blur(24px)" }}
-          aria-hidden="true"
-        />
-        <div
-          className="pointer-events-none absolute top-1/2 right-[-6%] hidden -translate-y-1/2 opacity-95 lg:block"
-          style={{ width: 880, height: 880 }}
-          aria-hidden="true"
-        >
-          <Globe />
-        </div>
         <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-12 px-6 pt-16 pb-20 sm:pt-24 lg:grid-cols-2">
           <div>
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-[#aab9e0]">
@@ -389,7 +377,16 @@ export default function Home() {
               .
             </p>
           </div>
-          <WhatsAppMock />
+          <div className="relative hidden items-center justify-center lg:flex">
+            <div
+              className="pointer-events-none absolute h-[440px] w-[440px] rounded-full"
+              style={{ background: "radial-gradient(circle, rgba(74,108,224,0.32), transparent 62%)", filter: "blur(30px)" }}
+              aria-hidden="true"
+            />
+            <div className="relative aspect-square w-full max-w-[480px]">
+              <Globe />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -404,6 +401,33 @@ export default function Home() {
               <div className="mt-1.5 text-xs leading-snug text-slate-500 sm:text-sm">{s.small}</div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* See it in action */}
+      <section className="border-b border-slate-100 bg-white">
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 lg:grid-cols-2">
+          <div>
+            <Eyebrow>See it work</Eyebrow>
+            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              One WhatsApp chat, start to finish
+            </h2>
+            <p className="mt-4 leading-relaxed text-slate-600">
+              Forward the PO, answer a question or two, reply APPROVE. That&apos;s the whole job —
+              Qra reads it, checks it, drafts the documents, and sends them to your customs broker.
+              No portal to learn, no forms to fill.
+            </p>
+            <a
+              href={WHATSAPP_LINK}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-6 inline-block rounded-full px-6 py-3 text-sm font-medium text-white shadow-sm transition-transform hover:-translate-y-0.5"
+              style={{ backgroundColor: BRAND }}
+            >
+              Start on WhatsApp
+            </a>
+          </div>
+          <WhatsAppMock />
         </div>
       </section>
 
