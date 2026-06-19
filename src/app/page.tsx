@@ -21,8 +21,8 @@ const LIGHT_BLUE = "#8aa0ee";
 
 const STATS = [
   { big: "Minutes", small: "from PO to a finished document set — not days" },
-  { big: "6", small: "export documents, all from one checked source" },
-  { big: "27,000+", small: "denied-party names screened, every shipment" },
+  { big: "Every", small: "export document, from one checked source" },
+  { big: "Screened", small: "every buyer, against global watchlists" },
   { big: "100%", small: "human-approved, and fully audited" },
 ];
 
@@ -67,18 +67,18 @@ const FEATURES = [
   },
   {
     icon: "🏷️",
-    title: "Drafts the HS code",
-    body: "No tariff code on the PO? Qra suggests one from your goods for you and your CHA to confirm — never guessed silently into a document.",
+    title: "Helps with classification",
+    body: "Missing a tariff code? Qra flags a suggested classification for you and your CHA to confirm — never slipped silently into a document.",
   },
   {
     icon: "📐",
-    title: "Checked against hard rules",
-    body: "Every weight, currency, total and incoterm is validated by deterministic checks. Anything it isn't sure of goes to a human, not into a document.",
+    title: "Every figure checked",
+    body: "Weights, currencies, totals and incoterms are all checked, and anything uncertain is flagged for a human rather than going into a document.",
   },
   {
     icon: "🛡️",
     title: "Sanctions-screened",
-    body: "Buyer, consignee and notify party screened against US, UN and EU denied-party lists — over 27,000 names — before a single document exists.",
+    body: "Buyer, consignee and notify party screened against global denied-party watchlists before a single document is created.",
   },
   {
     icon: "📜",
@@ -98,7 +98,7 @@ const FEATURES = [
   {
     icon: "🖥️",
     title: "A live console",
-    body: "Track every shipment in your console — see which agent is working, what it decided, and clear each gate from a pop-up.",
+    body: "Track every shipment from one console — follow its progress and approve each step.",
   },
   {
     icon: "📧",
@@ -137,6 +137,16 @@ const DOCS = [
     title: "Export Declaration / Annexure",
     body: "The supporting declaration and annexure, generated from the same source, so every value agrees across the whole set.",
   },
+];
+
+// Agent fleet — kept deliberately high-level. We don't publish the full roster,
+// each agent's exact method, or what's on the roadmap.
+const AGENTS = [
+  { icon: "📥", name: "Reading", body: "Reads your PO and structures the order." },
+  { icon: "🛡️", name: "Compliance", body: "Runs the screening and compliance checks." },
+  { icon: "📜", name: "Certification", body: "Flags the certificates a shipment needs." },
+  { icon: "📄", name: "Documents", body: "Drafts your consistent document set." },
+  { icon: "📧", name: "Filing", body: "Prepares the pack for your customs broker." },
 ];
 
 const ACTIVITY = [
@@ -490,6 +500,34 @@ export default function Home() {
             Plus conversational gap-fill, computed totals you confirm with one word, and a
             complete audit record on every document.
           </p>
+        </div>
+      </section>
+
+      {/* Agent fleet */}
+      <section className="border-t border-slate-100 bg-white">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <Eyebrow>The export OS</Eyebrow>
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            A team of agents, one for every step
+          </h2>
+          <p className="mt-3 max-w-2xl text-slate-600">
+            Qra runs your shipment as a team of specialist AI agents — each owns one step,
+            proposes its work, and a human approves at the gate.
+          </p>
+          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {AGENTS.map((a) => (
+              <div
+                key={a.name}
+                className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-5 transition hover:-translate-y-0.5 hover:shadow-md"
+              >
+                <IconChip>{a.icon}</IconChip>
+                <div className="min-w-0">
+                  <h3 className="font-semibold">{a.name}</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-600">{a.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
