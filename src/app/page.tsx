@@ -377,13 +377,13 @@ export default function Home() {
               .
             </p>
           </div>
-          <div className="relative hidden items-center justify-center lg:flex">
-            <div
-              className="pointer-events-none absolute h-[440px] w-[440px] rounded-full"
-              style={{ background: "radial-gradient(circle, rgba(74,108,224,0.32), transparent 62%)", filter: "blur(30px)" }}
-              aria-hidden="true"
-            />
-            <div className="relative aspect-square w-full max-w-[480px]">
+          <div className="relative hidden items-center justify-end lg:flex">
+            <div className="relative aspect-square w-[600px] max-w-none lg:-mr-10 xl:-mr-24">
+              <div
+                className="pointer-events-none absolute inset-10 rounded-full"
+                style={{ background: "radial-gradient(circle, rgba(74,108,224,0.32), transparent 60%)", filter: "blur(40px)" }}
+                aria-hidden="true"
+              />
               <Globe />
             </div>
           </div>
