@@ -309,7 +309,10 @@ export default function Home() {
             <a href="#faq" className="hidden text-slate-600 hover:text-slate-900 sm:inline">
               FAQ
             </a>
-            <Link href="/cha/login" className="text-slate-600 hover:text-slate-900">
+            <Link href="/portal/login" className="text-slate-600 hover:text-slate-900">
+              Exporter login
+            </Link>
+            <Link href="/cha/login" className="hidden text-slate-600 hover:text-slate-900 sm:inline">
               CHA login
             </Link>
             <a
@@ -689,6 +692,9 @@ export default function Home() {
             <a href={MAILTO} className="hover:text-slate-900">
               {CONTACT_EMAIL}
             </a>
+            <Link href="/portal/login" className="text-xs text-slate-400 hover:text-slate-700">
+              Exporter sign-in
+            </Link>
             <Link href="/cha/login" className="text-xs text-slate-400 hover:text-slate-700">
               CHA sign-in
             </Link>
