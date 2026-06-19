@@ -5,6 +5,9 @@ import { PortalLoginForm } from "./login-form";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Exporter login — Qra" };
 
+// Matches the landing page's WhatsApp CTA (sandbox join code pre-filled).
+const WHATSAPP_LINK = `https://wa.me/14155238886?text=${encodeURIComponent("join solve-scale")}`;
+
 export default function PortalLoginPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-white px-6 py-16">
@@ -23,7 +26,19 @@ export default function PortalLoginPage() {
           </p>
           <PortalLoginForm />
         </div>
-        <p className="mt-6 text-center text-xs text-slate-500">
+        <p className="mt-6 text-center text-sm text-slate-600">
+          New to Qra?{" "}
+          <a
+            href={WHATSAPP_LINK}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium underline"
+            style={{ color: "#3f5bd9" }}
+          >
+            Start on WhatsApp
+          </a>
+        </p>
+        <p className="mt-2 text-center text-xs text-slate-500">
           Are you a customs broker?{" "}
           <Link href="/cha/login" className="underline hover:text-slate-700">
             CHA login
