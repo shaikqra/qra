@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import { Globe } from "./globe";
 
 // Where the email link points. Change to whichever inbox you want enquiries in.
 const CONTACT_EMAIL = "abdulalis@gmail.com";
@@ -274,13 +275,22 @@ export default function Home() {
 
       {/* Hero — navy, brand-forward */}
       <section
-        className="relative text-white"
+        className="relative overflow-hidden text-white"
         style={{
           background:
             "radial-gradient(ellipse 90% 80% at 50% -10%, #18386f 0%, #0c2150 45%, #0a1a3d 100%)",
         }}
       >
-        <div className="max-w-6xl mx-auto px-6 pt-16 pb-20 sm:pt-24 grid lg:grid-cols-2 gap-12 items-center">
+        {/* Rotating dot-globe — the global-trade motif, kept subtle behind the
+            content so the WhatsApp demo stays the focus. Desktop only. */}
+        <div
+          className="pointer-events-none absolute top-1/2 right-[-14%] hidden -translate-y-1/2 opacity-60 lg:block"
+          style={{ width: 700, height: 700 }}
+          aria-hidden="true"
+        >
+          <Globe />
+        </div>
+        <div className="relative z-10 max-w-6xl mx-auto px-6 pt-16 pb-20 sm:pt-24 grid lg:grid-cols-2 gap-12 items-center">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-[#aab9e0] mb-6">
               the export OS · built for Indian exporters
