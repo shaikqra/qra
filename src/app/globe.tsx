@@ -3,7 +3,28 @@
 import { useEffect, useRef } from "react";
 import createGlobe from "cobe";
 
-// India and its main export destinations (lat, lng).
+type Vec = { x: number; y: number; z: number };
+
+const toVec = ([lat, lng]: [number, number]): Vec => {
+  const a = (lat * Math.PI) / 180;
+  const o = (lng * Math.PI) / 180;
+  return { x: Math.cos(a) * Math.sin(o), y: Math.sin(a), z: Math.cos(a) * Math.cos(o) };
+};
+const toLatLng = (v: Vec): [number, number] => [
+  (Math.asin(v.y) * 180) / Math.PI,
+  (Math.atan2(v.x, v.z) * 180) / Math.PI,
+];
+const slerp = (a: Vec, b: Vec, t: number): Vec => {
+  let d = a.x * b.x + a.y * b.y + a.z * b.z;
+  d = Math.max(-1, Math.min(1, d));
+  const o = Math.acos(d);
+  const so = Math.sin(o);
+  if (so < 1e-6) return a;
+  const k0 = Math.sin((1 - t) * o) / so;
+  const k1 = Math.sin(t * o) / so;
+  return { x: a.x * k0 + b.x * k1, y: a.y * k0 + b.y * k1, z: a.z * k0 + b.z * k1 };
+};
+
 const INDIA: [number, number] = [19, 73];
 const DESTS: [number, number][] = [
   [53.5, 10], // Hamburg
@@ -14,9 +35,18 @@ const DESTS: [number, number][] = [
   [31, 121], // Shanghai
 ];
 
-// Proper dotted-continent globe via cobe (tiny WebGL lib). Brand-blue dots on a
-// dark sphere, glowing markers at India's export ports, glowing route arcs from
-// India to each, slow auto-spin. Pauses for reduced-motion.
+// Pre-computed great circles from India to each destination + a phase so the
+// pulses travel out of sync.
+const ROUTES = DESTS.map((d, i) => ({
+  va: toVec(INDIA),
+  vb: toVec(d),
+  speed: 0.0034 + i * 0.0005,
+  offset: i / DESTS.length,
+}));
+
+// Proper dotted-continent globe (cobe). Brand-blue continents, glowing port
+// markers, static route arcs from India, and glowing pulses that flow along each
+// route. Pauses for reduced-motion.
 export function Globe() {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -27,7 +57,13 @@ export function Globe() {
     const size = canvas.clientWidth || 700;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let phi = 0;
+    let tick = 0;
     let raf = 0;
+
+    const portMarkers = [
+      { location: INDIA, size: 0.1 },
+      ...DESTS.map((location) => ({ location, size: 0.05 })),
+    ];
 
     const globe = createGlobe(canvas, {
       devicePixelRatio: dpr,
@@ -42,19 +78,28 @@ export function Globe() {
       baseColor: [0.38, 0.49, 0.95],
       markerColor: [0.74, 0.84, 1],
       glowColor: [0.16, 0.26, 0.6],
-      markers: [
-        { location: INDIA, size: 0.1 },
-        ...DESTS.map((location) => ({ location, size: 0.05 })),
-      ],
+      markers: portMarkers,
       arcs: DESTS.map((to) => ({ from: INDIA, to })),
-      arcColor: [0.6, 0.74, 1],
+      arcColor: [0.5, 0.66, 1],
       arcWidth: 0.5,
-      arcHeight: 0.5,
+      arcHeight: 0.4,
     });
 
     const frame = () => {
-      if (!reduce) phi += 0.004;
-      globe.update({ phi });
+      if (!reduce) {
+        phi += 0.004;
+        tick += 1;
+      }
+      // A glowing dot travelling along each route.
+      const pulses = ROUTES.map((r) => {
+        const t = (tick * r.speed + r.offset) % 1;
+        return {
+          location: toLatLng(slerp(r.va, r.vb, t)),
+          size: 0.045,
+          color: [0.92, 0.96, 1] as [number, number, number],
+        };
+      });
+      globe.update({ phi, markers: [...portMarkers, ...pulses] });
       raf = requestAnimationFrame(frame);
     };
     frame();
