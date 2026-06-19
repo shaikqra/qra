@@ -20,6 +20,7 @@ import { CertList, type CertItem } from "./cert-list";
 import { documentProvenance } from "@/lib/provenance/fields";
 import { ProvenancePanel } from "./provenance-panel";
 import { TrackingCard, type Tracking } from "./tracking-card";
+import { PortalChat } from "./portal-chat";
 
 export const dynamic = "force-dynamic";
 
@@ -246,6 +247,8 @@ export default async function PortalShipment({
 
       <LiveRefresh active={liveActive} />
       <AgentFleet cards={fleet} />
+
+      <PortalChat token={token} shipmentId={shipmentId} />
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">Order</h2>
