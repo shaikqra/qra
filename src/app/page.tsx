@@ -44,13 +44,28 @@ const STEPS = [
 const FEATURES = [
   {
     icon: "💬",
-    title: "On WhatsApp",
-    body: "Your team already lives on WhatsApp. Qra meets them there — nothing new to learn, nobody to train.",
+    title: "On WhatsApp — or email",
+    body: "Send the PO on WhatsApp, or forward it to your own Qra inbox. Your team works where it already is — nothing new to install or learn.",
   },
   {
-    icon: "⚡",
-    title: "Minutes, not days",
-    body: "A purchase order becomes a finished, checked document set in the time it takes to make chai.",
+    icon: "📥",
+    title: "Reads any PO",
+    body: "A PDF, a photo of a printout, or a typed message — Qra pulls every detail into one clean, structured order.",
+  },
+  {
+    icon: "✍️",
+    title: "Asks for what's missing",
+    body: "Most POs are missing a detail or two. Qra asks in plain language, right in the chat, and slots your reply into the right field.",
+  },
+  {
+    icon: "🏷️",
+    title: "Drafts the HS code",
+    body: "No tariff code on the PO? Qra suggests one from your goods for you and your CHA to confirm — never guessed silently into a document.",
+  },
+  {
+    icon: "📐",
+    title: "Checked against hard rules",
+    body: "Every weight, currency, total and incoterm is validated by deterministic checks. Anything it isn't sure of goes to a human, not into a document.",
   },
   {
     icon: "🛡️",
@@ -58,19 +73,34 @@ const FEATURES = [
     body: "Buyer, consignee and notify party screened against US, UN and EU denied-party lists — over 27,000 names — before a single document exists.",
   },
   {
-    icon: "✅",
-    title: "A human always approves",
-    body: "Qra is an assistant, not an autopilot. Nothing reaches your customs broker until you've reviewed and approved it.",
-  },
-  {
     icon: "📜",
-    title: "Fully audited",
-    body: "Every document carries an immutable record — what was made, from which data, screened against what, approved by whom, when.",
+    title: "Knows the certificates you need",
+    body: "Qra flags the certificates your shipment needs for its destination and product, so nothing's missing when it reaches the port.",
   },
   {
-    icon: "🌍",
-    title: "Any product, any destination",
-    body: "Agri to engineering goods, EU to the Gulf — the core flow works for every export lane from India.",
+    icon: "🗂️",
+    title: "The full document set",
+    body: "Commercial invoice, packing list, certificate of origin, proforma, shipping-bill checklist and export declaration — all from one checked source.",
+  },
+  {
+    icon: "✋",
+    title: "You approve every gate",
+    body: "Confirm the order, check flagged details, approve the docs, confirm goods are ready. Qra proposes; you decide, at every step.",
+  },
+  {
+    icon: "🖥️",
+    title: "A live console",
+    body: "Track every shipment in your console — see which agent is working, what it decided, and clear each gate from a pop-up.",
+  },
+  {
+    icon: "📧",
+    title: "Straight to your CHA",
+    body: "On your approval, the finished set lands in your customs broker's inbox. Your existing relationships stay exactly as they are.",
+  },
+  {
+    icon: "🔒",
+    title: "Immutable audit trail",
+    body: "Every document carries a tamper-evident record — what was made, from what data, screened against what, approved by whom and when — kept for years.",
   },
 ];
 
@@ -86,6 +116,18 @@ const DOCS = [
   {
     title: "Certificate of Origin (draft)",
     body: "A clean non-preferential draft, cross-referenced to the invoice, ready for your Chamber of Commerce to certify.",
+  },
+  {
+    title: "Proforma Invoice",
+    body: "On request — a proforma for advance payment or opening a letter of credit, drawn from the same order so it agrees with the final invoice.",
+  },
+  {
+    title: "Shipping-Bill Checklist",
+    body: "The data sheet your CHA needs to file the shipping bill on ICEGATE — assembled and checked, ready to hand straight over.",
+  },
+  {
+    title: "Export Declaration / Annexure",
+    body: "The supporting declaration and annexure, generated from the same source, so every value agrees across the whole set.",
   },
 ];
 
