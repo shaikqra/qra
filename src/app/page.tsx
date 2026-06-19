@@ -12,6 +12,11 @@ const WHATSAPP_NUMBER = "14155238886";
 const WHATSAPP_JOIN = "join solve-scale";
 const WHATSAPP_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(WHATSAPP_JOIN)}`;
 
+// Brand colour: cornflower/royal blue from the Qra mark. Kept as a constant so the
+// accent stays consistent and is trivial to retune in one place.
+const BRAND = "#3f5bd9";
+const BRAND_HOVER = "#3349be";
+
 const STEPS = [
   {
     n: "1",
@@ -121,11 +126,30 @@ const FAQS = [
   },
 ];
 
+// The Qra aperture mark, recreated as inline SVG so it stays crisp at any size and
+// inherits its colour from the surrounding text (currentColor). Drop a real logo
+// SVG into /public and swap this out if you'd rather use the exact artwork.
+function Mark({ className = "", style }: { className?: string; style?: React.CSSProperties }) {
+  return (
+    <svg viewBox="0 0 100 100" className={className} style={style} fill="none" aria-hidden="true">
+      <g stroke="currentColor" strokeWidth="9" strokeLinecap="round">
+        {[0, 60, 120, 180, 240, 300].map((a) => (
+          <path key={a} d="M50 50 Q 74 34 53 12" transform={`rotate(${a} 50 50)`} />
+        ))}
+      </g>
+      <circle cx="50" cy="50" r="6.5" fill="currentColor" />
+    </svg>
+  );
+}
+
 function WhatsAppMock() {
   return (
-    <div className="rounded-2xl border border-zinc-200 bg-[#e5ddd5] p-4 shadow-xl w-full max-w-sm mx-auto">
+    <div className="rounded-2xl border border-slate-200 bg-[#e5ddd5] p-4 shadow-2xl w-full max-w-sm mx-auto">
       <div className="flex items-center gap-3 rounded-t-xl bg-[#075e54] px-4 py-3 -m-4 mb-3">
-        <div className="h-9 w-9 rounded-full bg-emerald-500 flex items-center justify-center text-white font-semibold">
+        <div
+          className="h-9 w-9 rounded-full flex items-center justify-center text-white font-semibold"
+          style={{ backgroundColor: BRAND }}
+        >
           Q
         </div>
         <div>
@@ -166,7 +190,7 @@ function WhatsAppMock() {
           <span className="block text-[10px] text-zinc-500 text-right mt-1">1:58 pm ✓✓</span>
         </div>
         <div className="self-start max-w-[85%] rounded-lg rounded-tl-none bg-white px-3 py-2 shadow-sm">
-          ✅ Approved & locked. Sending the set to your customs broker now.
+          ✅ Approved &amp; locked. Sending the set to your customs broker now.
           <span className="block text-[10px] text-zinc-400 text-right mt-1">1:58 pm</span>
         </div>
       </div>
@@ -176,29 +200,35 @@ function WhatsAppMock() {
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen bg-white text-zinc-900">
+    <div className="flex flex-col min-h-screen bg-white text-slate-900">
       {/* Header */}
-      <header className="border-b border-zinc-100 sticky top-0 bg-white/90 backdrop-blur z-10">
+      <header className="border-b border-slate-100 sticky top-0 bg-white/90 backdrop-blur z-20">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <span className="text-lg font-semibold tracking-tight">Qra</span>
+          <span className="inline-flex items-center gap-2">
+            <Mark className="h-7 w-7" style={{ color: BRAND }} />
+            <span className="text-lg font-semibold tracking-tight" style={{ color: "#0b1e44" }}>
+              Qra
+            </span>
+          </span>
           <nav className="flex items-center gap-6 text-sm">
-            <a href="#how" className="text-zinc-600 hover:text-zinc-900 hidden sm:inline">
+            <a href="#how" className="text-slate-600 hover:text-slate-900 hidden sm:inline">
               How it works
             </a>
-            <a href="#docs" className="text-zinc-600 hover:text-zinc-900 hidden sm:inline">
+            <a href="#docs" className="text-slate-600 hover:text-slate-900 hidden sm:inline">
               Documents
             </a>
-            <a href="#faq" className="text-zinc-600 hover:text-zinc-900 hidden sm:inline">
+            <a href="#faq" className="text-slate-600 hover:text-slate-900 hidden sm:inline">
               FAQ
             </a>
-            <Link href="/cha/login" className="text-zinc-600 hover:text-zinc-900">
+            <Link href="/cha/login" className="text-slate-600 hover:text-slate-900">
               CHA login
             </Link>
             <a
               href={WHATSAPP_LINK}
               target="_blank"
               rel="noreferrer"
-              className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              className="rounded-full px-4 py-2 text-sm font-medium text-white transition-colors"
+              style={{ backgroundColor: BRAND }}
             >
               Start on WhatsApp
             </a>
@@ -206,67 +236,77 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="max-w-6xl mx-auto px-6 pt-16 pb-20 sm:pt-24 grid lg:grid-cols-2 gap-12 items-center">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 mb-6">
-            WhatsApp-native AI for Indian exporters
+      {/* Hero — navy, brand-forward */}
+      <section
+        className="relative text-white"
+        style={{
+          background:
+            "radial-gradient(ellipse 90% 80% at 50% -10%, #18386f 0%, #0c2150 45%, #0a1a3d 100%)",
+        }}
+      >
+        <div className="max-w-6xl mx-auto px-6 pt-16 pb-20 sm:pt-24 grid lg:grid-cols-2 gap-12 items-center">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-[#aab9e0] mb-6">
+              <Mark className="h-3.5 w-3.5 text-[#8aa0ee]" />
+              the export OS · built for Indian exporters
+            </div>
+            <h1 className="text-4xl sm:text-5xl xl:text-6xl font-semibold tracking-tight leading-[1.05]">
+              Export paperwork that takes days,
+              <span style={{ color: "#8aa0ee" }}> done in minutes.</span>
+            </h1>
+            <p className="mt-6 text-lg text-slate-300 leading-relaxed">
+              Qra turns your buyer&apos;s purchase order into compliant export documents —
+              sanctions-screened, rule-checked, and emailed to your customs broker. You just
+              send the PO on WhatsApp and reply APPROVE.
+            </p>
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              <a
+                href={WHATSAPP_LINK}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-full px-6 py-3 text-sm font-medium text-white transition-colors"
+                style={{ backgroundColor: BRAND }}
+              >
+                Start on WhatsApp
+              </a>
+              <a
+                href="#how"
+                className="rounded-full border border-white/25 px-6 py-3 text-sm font-medium text-white hover:bg-white/10 transition-colors"
+              >
+                See how it works
+              </a>
+            </div>
+            <p className="mt-6 text-sm text-slate-400">
+              No new software for your team. No change to your customs broker. Or{" "}
+              <a href={MAILTO} className="underline hover:text-slate-200">
+                email us
+              </a>
+              .
+            </p>
           </div>
-          <h1 className="text-4xl sm:text-5xl xl:text-6xl font-semibold tracking-tight leading-[1.05]">
-            Export paperwork that takes days,
-            <span className="text-emerald-600"> done in minutes.</span>
-          </h1>
-          <p className="mt-6 text-lg text-zinc-600 leading-relaxed">
-            Qra turns your buyer&apos;s purchase order into compliant export documents —
-            sanctions-screened, rule-checked, and emailed to your customs broker. You just
-            send the PO on WhatsApp and reply APPROVE.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a
-              href={WHATSAPP_LINK}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-full bg-emerald-600 px-6 py-3 text-sm font-medium text-white hover:bg-emerald-700"
-            >
-              Start on WhatsApp
-            </a>
-            <a
-              href="#how"
-              className="rounded-full border border-zinc-300 px-6 py-3 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-            >
-              See how it works
-            </a>
-          </div>
-          <p className="mt-6 text-sm text-zinc-500">
-            No new software for your team. No change to your customs broker. Or{" "}
-            <a href={MAILTO} className="underline hover:text-zinc-700">
-              email us
-            </a>
-            .
-          </p>
+          <WhatsAppMock />
         </div>
-        <WhatsAppMock />
       </section>
 
       {/* Before / after strip */}
-      <section className="border-y border-zinc-100 bg-zinc-50">
+      <section className="border-b border-slate-100 bg-slate-50">
         <div className="max-w-6xl mx-auto px-6 py-12 grid sm:grid-cols-2 gap-6">
-          <div className="rounded-xl border border-zinc-200 bg-white p-6">
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Documentation today
             </div>
-            <ul className="mt-3 space-y-2 text-sm text-zinc-600">
+            <ul className="mt-3 space-y-2 text-sm text-slate-600">
               <li>• Hours of skilled staff time, retyping the same details by hand</li>
               <li>• The same details keyed across invoice, packing list and certificates</li>
               <li>• Sanctions checks done rarely, manually, or not at all</li>
               <li>• One typo caught late — discrepancy fees at the bank, demurrage at the port</li>
             </ul>
           </div>
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
-            <div className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
+          <div className="rounded-2xl border p-6" style={{ backgroundColor: "#eef1fc", borderColor: "#cdd6f7" }}>
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: BRAND }}>
               With Qra
             </div>
-            <ul className="mt-3 space-y-2 text-sm text-emerald-900">
+            <ul className="mt-3 space-y-2 text-sm" style={{ color: "#28357f" }}>
               <li>• Minutes from PO to a finished, consistent document set</li>
               <li>• Every value entered once, checked by rules, used everywhere</li>
               <li>• Every buyer screened against US + UN + EU lists, every time</li>
@@ -277,22 +317,25 @@ export default function Home() {
       </section>
 
       {/* Stat callout — the verified pain */}
-      <section className="bg-zinc-900 text-white">
+      <section className="text-white" style={{ backgroundColor: "#0b1e44" }}>
         <div className="max-w-6xl mx-auto px-6 py-16 grid gap-8 sm:grid-cols-[auto_1fr] items-center">
-          <div className="text-6xl sm:text-7xl font-bold tracking-tight text-emerald-400 tabular-nums">
+          <div
+            className="text-6xl sm:text-7xl font-bold tracking-tight tabular-nums"
+            style={{ color: "#8aa0ee" }}
+          >
             ~70%
           </div>
           <div>
             <p className="text-xl font-semibold leading-snug">
               of letter-of-credit document sets are rejected on first presentation.
             </p>
-            <p className="mt-3 text-sm text-zinc-300 leading-relaxed max-w-2xl">
+            <p className="mt-3 text-sm text-slate-300 leading-relaxed max-w-2xl">
               Usually for small discrepancies — a detail that doesn&apos;t match across the invoice,
               packing list and transport documents. Each rejection means a bank fee and a wait to get
               paid. Qra builds every document from one checked source, so they agree — cutting the
               discrepancies that send a set back.
             </p>
-            <p className="mt-2 text-xs text-zinc-500">
+            <p className="mt-2 text-xs text-slate-500">
               Source: ICC Banking Commission / trade-finance data.
             </p>
           </div>
@@ -304,41 +347,44 @@ export default function Home() {
         <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
           From purchase order to your broker&apos;s inbox
         </h2>
-        <p className="mt-3 text-zinc-600 max-w-2xl">
+        <p className="mt-3 text-slate-600 max-w-2xl">
           One WhatsApp conversation. Qra does the work; you approve at the gate.
         </p>
         <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {STEPS.map((s) => (
-            <div key={s.n} className="rounded-xl border border-zinc-200 bg-white p-6">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-600 text-sm font-semibold text-white">
+            <div key={s.n} className="rounded-2xl border border-slate-200 bg-white p-6">
+              <div
+                className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold text-white"
+                style={{ backgroundColor: BRAND }}
+              >
                 {s.n}
               </div>
               <h3 className="mt-4 font-semibold">{s.title}</h3>
-              <p className="mt-2 text-sm text-zinc-600 leading-relaxed">{s.body}</p>
+              <p className="mt-2 text-sm text-slate-600 leading-relaxed">{s.body}</p>
             </div>
           ))}
         </div>
       </section>
 
       {/* Documents you get */}
-      <section id="docs" className="border-t border-zinc-100 bg-zinc-50">
+      <section id="docs" className="border-t border-slate-100 bg-slate-50">
         <div className="max-w-6xl mx-auto px-6 py-20">
           <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
             The documents, done properly
           </h2>
-          <p className="mt-3 text-zinc-600 max-w-2xl">
+          <p className="mt-3 text-slate-600 max-w-2xl">
             Generated from one set of checked data, so they always agree with each other.
           </p>
           <div className="mt-10 grid gap-6 sm:grid-cols-3">
             {DOCS.map((d) => (
-              <div key={d.title} className="rounded-xl border border-zinc-200 bg-white p-6">
+              <div key={d.title} className="rounded-2xl border border-slate-200 bg-white p-6">
                 <div className="text-2xl">📄</div>
                 <h3 className="mt-3 font-semibold">{d.title}</h3>
-                <p className="mt-2 text-sm text-zinc-600 leading-relaxed">{d.body}</p>
+                <p className="mt-2 text-sm text-slate-600 leading-relaxed">{d.body}</p>
               </div>
             ))}
           </div>
-          <p className="mt-6 text-sm text-zinc-500">
+          <p className="mt-6 text-sm text-slate-500">
             Plus conversational gap-fill, computed totals you confirm with one word, and a
             complete audit record on every document.
           </p>
@@ -351,39 +397,39 @@ export default function Home() {
           <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
             Watch the agent work — every decision, on the record
           </h2>
-          <p className="mt-4 text-zinc-600 leading-relaxed">
+          <p className="mt-4 text-slate-600 leading-relaxed">
             Qra isn&apos;t a black box. Every shipment shows a live activity feed of exactly
             what the AI did and why: what it read, what it asked, who it screened, what it
             generated, and who approved. The same record is kept immutably for audits —
             for years.
           </p>
-          <p className="mt-4 text-zinc-600 leading-relaxed font-medium">
+          <p className="mt-4 leading-relaxed font-medium" style={{ color: BRAND }}>
             The AI proposes. Rules check. A human approves. The workflow remembers.
           </p>
         </div>
-        <div className="rounded-2xl border border-zinc-200 bg-white shadow-xl divide-y divide-zinc-100">
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-xl divide-y divide-slate-100">
           {ACTIVITY.map((a) => (
             <div key={a.text} className="flex items-center gap-3 px-5 py-3">
               <span className="text-base">{a.icon}</span>
-              <span className="flex-1 text-sm text-zinc-700">{a.text}</span>
-              <span className="text-xs text-zinc-400">{a.time}</span>
+              <span className="flex-1 text-sm text-slate-700">{a.text}</span>
+              <span className="text-xs text-slate-400">{a.time}</span>
             </div>
           ))}
         </div>
       </section>
 
       {/* Features */}
-      <section className="border-t border-zinc-100 bg-zinc-900 text-zinc-100">
+      <section className="border-t text-slate-100" style={{ backgroundColor: "#0b1e44", borderColor: "#13275a" }}>
         <div className="max-w-6xl mx-auto px-6 py-20">
-          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight max-w-3xl">
+          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight max-w-3xl text-white">
             Built for accuracy, because a wrong document is a customs penalty
           </h2>
           <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f) => (
-              <div key={f.title} className="rounded-xl border border-zinc-700/60 bg-zinc-800/40 p-6">
+              <div key={f.title} className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
                 <div className="text-xl">{f.icon}</div>
                 <h3 className="mt-3 font-semibold text-white">{f.title}</h3>
-                <p className="mt-2 text-sm text-zinc-300 leading-relaxed">{f.body}</p>
+                <p className="mt-2 text-sm text-slate-300 leading-relaxed">{f.body}</p>
               </div>
             ))}
           </div>
@@ -393,26 +439,32 @@ export default function Home() {
       {/* FAQ */}
       <section id="faq" className="max-w-3xl mx-auto px-6 py-20 w-full">
         <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">Questions, answered</h2>
-        <div className="mt-8 divide-y divide-zinc-200 border-y border-zinc-200">
+        <div className="mt-8 divide-y divide-slate-200 border-y border-slate-200">
           {FAQS.map((f) => (
             <details key={f.q} className="group py-4">
-              <summary className="flex cursor-pointer items-center justify-between text-left font-medium text-zinc-900 list-none">
+              <summary className="flex cursor-pointer items-center justify-between text-left font-medium text-slate-900 list-none">
                 {f.q}
-                <span className="ml-4 text-zinc-400 group-open:rotate-45 transition-transform">＋</span>
+                <span
+                  className="ml-4 group-open:rotate-45 transition-transform"
+                  style={{ color: BRAND }}
+                >
+                  ＋
+                </span>
               </summary>
-              <p className="mt-3 text-sm text-zinc-600 leading-relaxed">{f.a}</p>
+              <p className="mt-3 text-sm text-slate-600 leading-relaxed">{f.a}</p>
             </details>
           ))}
         </div>
       </section>
 
-      {/* Final CTA */}
-      <section className="border-t border-zinc-100 bg-zinc-50">
+      {/* Final CTA — navy band */}
+      <section className="text-white" style={{ backgroundColor: "#0b1e44" }}>
         <div className="max-w-6xl mx-auto px-6 py-20 text-center">
+          <Mark className="h-10 w-10 mx-auto mb-5 text-[#8aa0ee]" />
           <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight">
             Try Qra on one real shipment
           </h2>
-          <p className="mt-4 text-zinc-600 max-w-xl mx-auto">
+          <p className="mt-4 text-slate-300 max-w-xl mx-auto">
             We&apos;re working with a small group of Indian exporters to refine Qra. If your
             team loses hours to documentation, message us on WhatsApp — we&apos;ll run your
             next shipment through it together.
@@ -422,13 +474,14 @@ export default function Home() {
               href={WHATSAPP_LINK}
               target="_blank"
               rel="noreferrer"
-              className="rounded-full bg-emerald-600 px-8 py-3 text-sm font-medium text-white hover:bg-emerald-700"
+              className="rounded-full px-8 py-3 text-sm font-medium text-white transition-colors"
+              style={{ backgroundColor: BRAND }}
             >
               Start on WhatsApp
             </a>
             <a
               href={MAILTO}
-              className="rounded-full border border-zinc-300 px-8 py-3 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+              className="rounded-full border border-white/25 px-8 py-3 text-sm font-medium text-white hover:bg-white/10 transition-colors"
             >
               Email us instead
             </a>
@@ -437,18 +490,22 @@ export default function Home() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-zinc-100">
-        <div className="max-w-6xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-zinc-500">
-          <span className="font-semibold text-zinc-700">Qra</span>
+      <footer className="border-t border-slate-100">
+        <div className="max-w-6xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-slate-500">
+          <span className="inline-flex items-center gap-2">
+            <Mark className="h-5 w-5" style={{ color: BRAND }} />
+            <span className="font-semibold text-slate-700">Qra</span>
+            <span className="text-slate-400">· the export OS</span>
+          </span>
           <span>Export documentation, automated. Built in India. 🇮🇳</span>
           <div className="flex items-center gap-4">
-            <a href={MAILTO} className="hover:text-zinc-900">
+            <a href={MAILTO} className="hover:text-slate-900">
               {CONTACT_EMAIL}
             </a>
-            <Link href="/cha/login" className="text-zinc-400 hover:text-zinc-700 text-xs">
+            <Link href="/cha/login" className="text-slate-400 hover:text-slate-700 text-xs">
               CHA sign-in
             </Link>
-            <Link href="/internal/login" className="text-zinc-300 hover:text-zinc-500 text-xs">
+            <Link href="/internal/login" className="text-slate-300 hover:text-slate-500 text-xs">
               Team login
             </Link>
           </div>
