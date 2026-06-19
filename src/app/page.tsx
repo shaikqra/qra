@@ -281,11 +281,16 @@ export default function Home() {
             "radial-gradient(ellipse 90% 80% at 50% -10%, #18386f 0%, #0c2150 45%, #0a1a3d 100%)",
         }}
       >
-        {/* Rotating dot-globe — the global-trade motif, kept subtle behind the
-            content so the WhatsApp demo stays the focus. Desktop only. */}
+        {/* Rotating dot-globe with India's trade-route arcs — the global-trade
+            motif, behind the content. Desktop only. A soft glow sits behind it. */}
         <div
-          className="pointer-events-none absolute top-1/2 right-[-14%] hidden -translate-y-1/2 opacity-60 lg:block"
-          style={{ width: 700, height: 700 }}
+          className="pointer-events-none absolute top-1/2 right-[2%] hidden h-[560px] w-[560px] -translate-y-1/2 rounded-full lg:block"
+          style={{ background: "radial-gradient(circle, rgba(74,108,224,0.28), transparent 62%)", filter: "blur(24px)" }}
+          aria-hidden="true"
+        />
+        <div
+          className="pointer-events-none absolute top-1/2 right-[-6%] hidden -translate-y-1/2 opacity-95 lg:block"
+          style={{ width: 880, height: 880 }}
           aria-hidden="true"
         >
           <Globe />
