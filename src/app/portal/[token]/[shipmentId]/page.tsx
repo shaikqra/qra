@@ -111,7 +111,7 @@ export default async function PortalShipment({
   params: Promise<{ token: string; shipmentId: string }>;
 }) {
   if (portalRateLimited(await clientIp())) {
-    return <p className="text-sm text-zinc-500">Too many requests — please wait a moment and refresh.</p>;
+    return <p className="text-sm text-slate-500">Too many requests — please wait a moment and refresh.</p>;
   }
 
   const { token, shipmentId } = await params;

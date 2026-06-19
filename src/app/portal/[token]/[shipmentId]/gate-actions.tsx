@@ -111,19 +111,19 @@ export function GateActions({
   }
 
   const accentBtn = {
-    confirm: "bg-emerald-600 hover:bg-emerald-700",
+    confirm: "bg-[#3f5bd9] hover:bg-[#3349be]",
     verify: "bg-amber-600 hover:bg-amber-700",
-    approve: "bg-emerald-600 hover:bg-emerald-700",
-    goods: "bg-emerald-600 hover:bg-emerald-700",
-    close: "bg-emerald-600 hover:bg-emerald-700",
+    approve: "bg-[#3f5bd9] hover:bg-[#3349be]",
+    goods: "bg-[#3f5bd9] hover:bg-[#3349be]",
+    close: "bg-[#3f5bd9] hover:bg-[#3349be]",
     info: "bg-sky-600 hover:bg-sky-700",
   }[gate.kind];
   const accentBorder = {
-    confirm: "border-emerald-500",
+    confirm: "border-[#3f5bd9]",
     verify: "border-amber-500",
-    approve: "border-emerald-500",
-    goods: "border-emerald-500",
-    close: "border-emerald-500",
+    approve: "border-[#3f5bd9]",
+    goods: "border-[#3f5bd9]",
+    close: "border-[#3f5bd9]",
     info: "border-sky-500",
   }[gate.kind];
 
@@ -134,7 +134,7 @@ export function GateActions({
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className={`w-full rounded-xl border-2 ${accentBorder} bg-white px-4 py-3 text-left text-sm font-semibold text-zinc-900 hover:bg-zinc-50`}
+          className={`w-full rounded-xl border-2 ${accentBorder} bg-white px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50`}
         >
           ⚠ Action needed: {gate.title} — tap to review
         </button>
@@ -148,16 +148,16 @@ export function GateActions({
         >
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-3">
-              <h3 className="text-base font-semibold text-zinc-900">{gate.title}</h3>
+              <h3 className="text-base font-semibold text-slate-900">{gate.title}</h3>
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Dismiss"
-                className="text-zinc-400 hover:text-zinc-700"
+                className="text-slate-400 hover:text-slate-700"
               >
                 ✕
               </button>
             </div>
-            <p className="mt-1 text-sm text-zinc-500">{gate.subtitle}</p>
+            <p className="mt-1 text-sm text-slate-500">{gate.subtitle}</p>
 
             {gate.kind === "verify" && (
               <div className="mt-3 space-y-3">
@@ -170,14 +170,14 @@ export function GateActions({
                 )}
                 {verifyFields.map((f) => (
                   <label key={f.key} className="block">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                       {f.label}
                       {f.drafted ? " · Qra draft" : ""}
                     </span>
                     <input
                       value={vals[f.key] ?? ""}
                       onChange={(e) => setVals((s) => ({ ...s, [f.key]: e.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
                     />
                   </label>
                 ))}
@@ -197,7 +197,7 @@ export function GateActions({
                   <button
                     disabled={pending}
                     onClick={() => run(() => portalDeclineOrder(token, shipmentId))}
-                    className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                    className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                   >
                     Decline
                   </button>
@@ -223,7 +223,7 @@ export function GateActions({
                   </button>
                   <button
                     onClick={() => setOpen(false)}
-                    className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                    className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     Review first
                   </button>
@@ -240,7 +240,7 @@ export function GateActions({
                   </button>
                   <button
                     onClick={() => setOpen(false)}
-                    className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                    className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     Not yet
                   </button>
@@ -258,7 +258,7 @@ export function GateActions({
               {gate.kind === "info" && (
                 <button
                   onClick={() => setOpen(false)}
-                  className="w-full rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   Got it — I&apos;ll reply on WhatsApp
                 </button>

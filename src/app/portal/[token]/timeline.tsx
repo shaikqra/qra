@@ -4,7 +4,7 @@ import { PORTAL_STAGES, portalStageIndex, portalStopped } from "@/lib/portal/sta
 export function Timeline({ status }: { status: string }) {
   if (portalStopped(status)) {
     return (
-      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
         This shipment was stopped and is no longer being processed.
       </div>
     );
@@ -24,23 +24,23 @@ export function Timeline({ status }: { status: string }) {
               <span
                 className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                   done
-                    ? "bg-emerald-600 text-white"
+                    ? "bg-[#3f5bd9] text-white"
                     : active
-                      ? "bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500"
-                      : "bg-zinc-100 text-zinc-400"
+                      ? "bg-[#eef1fc] text-[#3f5bd9] ring-2 ring-[#3f5bd9]"
+                      : "bg-slate-100 text-slate-400"
                 }`}
               >
                 {done ? "✓" : i + 1}
               </span>
-              {!last && <span className={`w-0.5 grow ${done ? "bg-emerald-500" : "bg-zinc-200"}`} />}
+              {!last && <span className={`w-0.5 grow ${done ? "bg-[#3f5bd9]" : "bg-slate-200"}`} />}
             </div>
             <span
               className={`pt-0.5 pb-5 text-sm ${
                 active
-                  ? "font-semibold text-emerald-800"
+                  ? "font-semibold text-[#0b1e44]"
                   : done
-                    ? "text-zinc-700"
-                    : "text-zinc-400"
+                    ? "text-slate-700"
+                    : "text-slate-400"
               }`}
             >
               {stage.label}

@@ -40,7 +40,7 @@ async function clientIp(): Promise<string> {
 
 export default async function PortalHome({ params }: { params: Promise<{ token: string }> }) {
   if (portalRateLimited(await clientIp())) {
-    return <p className="text-sm text-zinc-500">Too many requests — please wait a moment and refresh.</p>;
+    return <p className="text-sm text-slate-500">Too many requests — please wait a moment and refresh.</p>;
   }
 
   const { token } = await params;
@@ -66,27 +66,27 @@ export default async function PortalHome({ params }: { params: Promise<{ token: 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
           {customer.display_name?.trim() || "Your shipments"}
         </h1>
-        <p className="text-sm text-zinc-500 mt-1">
+        <p className="text-sm text-slate-500 mt-1">
           Every shipment Qra is preparing for you. Tap one to see its progress and documents.
         </p>
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center">
-          <div className="text-base font-semibold text-zinc-800">No shipments yet</div>
-          <p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">
+        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center">
+          <div className="text-base font-semibold text-slate-800">No shipments yet</div>
+          <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
             Your orders appear here automatically. Send one to Qra on WhatsApp, or use your dedicated
             purchase-order inbox:
           </p>
           {poEmail && (
             <>
-              <div className="mx-auto mt-3 inline-block rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 font-mono text-sm text-zinc-800">
+              <div className="mx-auto mt-3 inline-block rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-sm text-slate-800">
                 {poEmail}
               </div>
-              <p className="mx-auto mt-3 max-w-md text-xs text-zinc-400">
+              <p className="mx-auto mt-3 max-w-md text-xs text-slate-400">
                 Give this address to your buyers so their purchase orders arrive straight in — or forward
                 orders you&apos;ve already received.
               </p>
@@ -101,13 +101,13 @@ export default async function PortalHome({ params }: { params: Promise<{ token: 
               <Link
                 key={r.id}
                 href={`/portal/${token}/${r.id}`}
-                className="block rounded-xl border border-zinc-200 bg-white p-4 hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+                className="block rounded-xl border border-slate-200 bg-white p-4 hover:border-[#3f5bd9] hover:bg-[#eef1fc] transition-colors"
               >
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-zinc-900">{r.reference_number}</span>
-                  <span className="ml-auto text-xs font-semibold text-emerald-700">{stageLabel(r.status)}</span>
+                  <span className="font-mono text-xs font-bold text-slate-900">{r.reference_number}</span>
+                  <span className="ml-auto text-xs font-semibold text-[#3f5bd9]">{stageLabel(r.status)}</span>
                 </div>
-                <div className="text-sm text-zinc-600 mt-1">{goodsLine(r.extracted_data)}</div>
+                <div className="text-sm text-slate-600 mt-1">{goodsLine(r.extracted_data)}</div>
                 {hint && <div className="text-xs text-amber-700 mt-1.5 font-medium">{hint}</div>}
               </Link>
             );

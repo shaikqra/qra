@@ -35,16 +35,16 @@ export function OptionalDocs({ token, shipmentId }: { token: string; shipmentId:
     <button
       onClick={() => gen(kind, label)}
       disabled={pending}
-      className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-semibold text-zinc-700 hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-50"
+      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:border-[#3f5bd9] hover:bg-[#eef1fc] disabled:opacity-50"
     >
       {busy === kind ? "Generating…" : `Generate ${label}`}
     </button>
   );
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-      <div className="text-sm font-semibold text-zinc-700">Optional documents</div>
-      <div className="mt-0.5 text-xs text-zinc-500">
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="text-sm font-semibold text-slate-700">Optional documents</div>
+      <div className="mt-0.5 text-xs text-slate-500">
         Generate these only if your buyer or bank asks for them.
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
