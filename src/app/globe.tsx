@@ -10,8 +10,36 @@ const latLng = (latDeg: number, lngDeg: number): Vec => {
   return { x: Math.cos(lat) * Math.sin(lng), y: Math.sin(lat), z: Math.cos(lat) * Math.cos(lng) };
 };
 
-// Spherical interpolation between two unit vectors, bulged outward toward the
-// middle so a route arcs off the surface like a flight path.
+// Coarse land map as overlapping ellipses (centre lat/lng + radii in degrees).
+// Approximate — enough to read as continents on a small rotating globe without
+// shipping a map image. Antarctica is handled as a latitude band below.
+const LAND = [
+  { lat: 52, lng: -100, rLat: 20, rLng: 33 }, // N. America (Canada/US)
+  { lat: 34, lng: -98, rLat: 12, rLng: 17 }, //   southern US / Mexico
+  { lat: 70, lng: -95, rLat: 9, rLng: 38 }, //    Canadian north
+  { lat: 72, lng: -42, rLat: 9, rLng: 13 }, //    Greenland
+  { lat: -8, lng: -60, rLat: 23, rLng: 13 }, //   S. America
+  { lat: -34, lng: -64, rLat: 12, rLng: 8 }, //   southern cone
+  { lat: 52, lng: 14, rLat: 12, rLng: 22 }, //    Europe
+  { lat: 6, lng: 19, rLat: 20, rLng: 19 }, //     N./central Africa
+  { lat: -18, lng: 26, rLat: 17, rLng: 13 }, //   southern Africa
+  { lat: 52, lng: 92, rLat: 22, rLng: 55 }, //    N. Asia
+  { lat: 26, lng: 78, rLat: 15, rLng: 20 }, //    India / S. Asia
+  { lat: 14, lng: 106, rLat: 12, rLng: 15 }, //   SE Asia
+  { lat: -25, lng: 134, rLat: 12, rLng: 16 }, //  Australia
+];
+
+const isLand = (lat: number, lng: number): boolean => {
+  if (lat < -66) return true; // Antarctica
+  for (const c of LAND) {
+    const dLng = ((lng - c.lng + 540) % 360) - 180;
+    const a = dLng / c.rLng;
+    const b = (lat - c.lat) / c.rLat;
+    if (a * a + b * b <= 1) return true;
+  }
+  return false;
+};
+
 const arcPoints = (a: Vec, b: Vec, segs: number): Vec[] => {
   let dot = a.x * b.x + a.y * b.y + a.z * b.z;
   dot = Math.max(-1, Math.min(1, dot));
@@ -33,7 +61,6 @@ const arcPoints = (a: Vec, b: Vec, segs: number): Vec[] => {
   return out;
 };
 
-// India → its export destinations. Decorative, not to-scale, but on-theme.
 const INDIA = latLng(19, 73);
 const DESTS = [
   latLng(53.5, 10), // Hamburg
@@ -44,8 +71,9 @@ const DESTS = [
   latLng(31, 121), // Shanghai
 ];
 
-// A rotating dot-globe with glowing trade-route arcs from India. Hand-rolled on a
-// 2D canvas — no dependency, stays smooth. Rotation pauses for reduced-motion.
+// A rotating globe whose dots form the continents, with glowing trade-route arcs
+// from India. Hand-rolled 2D canvas — no dependency, stays smooth, pauses for
+// reduced-motion.
 export function Globe() {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -64,14 +92,17 @@ export function Globe() {
     resize();
     window.addEventListener("resize", resize);
 
-    // Even points on a sphere (Fibonacci lattice).
-    const N = 900;
+    // Dense Fibonacci sphere; each point tagged land/ocean from the map above.
+    const N = 3000;
     const golden = Math.PI * (3 - Math.sqrt(5));
-    const dots: Vec[] = Array.from({ length: N }, (_, i) => {
+    const dots = Array.from({ length: N }, (_, i) => {
       const y = 1 - (i / (N - 1)) * 2;
       const r = Math.sqrt(Math.max(0, 1 - y * y));
       const t = golden * i;
-      return { x: Math.cos(t) * r, y, z: Math.sin(t) * r };
+      const v = { x: Math.cos(t) * r, y, z: Math.sin(t) * r };
+      const lat = (Math.asin(v.y) * 180) / Math.PI;
+      const lng = (Math.atan2(v.x, v.z) * 180) / Math.PI;
+      return { ...v, land: isLand(lat, lng) };
     });
 
     const SEGS = 50;
@@ -108,33 +139,38 @@ export function Globe() {
 
       ctx.clearRect(0, 0, w, w);
 
-      // Surface dots.
+      // Continent dots (bright) over a very faint ocean (sphere form).
       for (const p of dots) {
         const { sx, sy, depth } = project(p);
-        ctx.beginPath();
-        ctx.arc(sx, sy, (0.5 + depth * 1.7) * dpr, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(150,176,255,${0.1 + depth * 0.72})`;
-        ctx.fill();
+        if (p.land) {
+          const s = (0.9 + depth * 1.7) * dpr;
+          ctx.fillStyle = `rgba(155,180,255,${0.16 + depth * 0.74})`;
+          ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
+        } else {
+          const s = 0.8 * dpr;
+          ctx.fillStyle = `rgba(120,150,235,${0.04 + depth * 0.08})`;
+          ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
+        }
       }
 
-      // Route arcs.
+      // Route arcs (front half only).
       ctx.lineWidth = 1.3 * dpr;
       for (const route of routes) {
         for (let i = 0; i < route.pts.length - 1; i++) {
           const a = project(route.pts[i]);
           const b = project(route.pts[i + 1]);
           const depth = (a.depth + b.depth) / 2;
-          if (depth < 0.34) continue; // hide the back half
+          if (depth < 0.34) continue;
           ctx.beginPath();
           ctx.moveTo(a.sx, a.sy);
           ctx.lineTo(b.sx, b.sy);
-          ctx.strokeStyle = `rgba(130,160,255,${(depth - 0.3) * 0.6})`;
+          ctx.strokeStyle = `rgba(140,170,255,${(depth - 0.3) * 0.6})`;
           ctx.stroke();
         }
       }
 
-      // Travelling pulses along each route.
-      ctx.shadowColor = "rgba(150,180,255,0.9)";
+      // Travelling pulses.
+      ctx.shadowColor = "rgba(160,190,255,0.9)";
       for (const route of routes) {
         const t = ((tick * route.speed + route.offset) % 1) * SEGS;
         const p = project(route.pts[Math.floor(t)]);
@@ -142,7 +178,7 @@ export function Globe() {
         ctx.beginPath();
         ctx.shadowBlur = 8 * dpr;
         ctx.arc(p.sx, p.sy, 2.1 * dpr, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(214,226,255,${p.depth})`;
+        ctx.fillStyle = `rgba(220,230,255,${p.depth})`;
         ctx.fill();
       }
 
@@ -153,7 +189,7 @@ export function Globe() {
         ctx.beginPath();
         ctx.shadowBlur = 10 * dpr;
         ctx.arc(p.sx, p.sy, 2.6 * dpr, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(180,200,255,${0.55 + p.depth * 0.45})`;
+        ctx.fillStyle = `rgba(190,208,255,${0.55 + p.depth * 0.45})`;
         ctx.fill();
       }
       ctx.shadowBlur = 0;
