@@ -69,31 +69,51 @@ export async function sendDocsToCustomerCore(
 
   const client = twilio(sid, token);
   let sent = 0;
+  let lastErr: string | null = null;
 
   // WhatsApp via Twilio allows one file per message, so the documents go out
-  // back-to-back labeled by name only, followed by a single approval prompt.
+  // back-to-back labeled by name only, followed by a single approval prompt. Each
+  // send is isolated: one document failing (a closed sandbox session, a bad number)
+  // is logged with its Twilio code and skipped, rather than aborting the whole batch.
   for (const [docType, path] of latest) {
     const { data: signed } = await admin.storage
       .from("generated-docs")
       .createSignedUrl(path, 60 * 60); // Twilio fetches within the hour
     if (!signed?.signedUrl) continue;
 
+    try {
+      await client.messages.create({
+        from: fromNumber,
+        to,
+        body: `${DOC_LABELS[docType] ?? docType} — shipment ${shipment.reference_number}`,
+        mediaUrl: [signed.signedUrl],
+      });
+      sent++;
+    } catch (e) {
+      const code = (e as { code?: number | string } | null)?.code;
+      lastErr = code != null ? String(code) : e instanceof Error ? e.name : "unknown";
+      console.error("whatsapp_doc_send_failed", { shipmentId, docType, code: lastErr });
+    }
+  }
+
+  if (sent === 0) {
+    // Every send failed — surface the Twilio code so it's diagnosable
+    // (e.g. 63016 = no open WhatsApp session / sandbox window closed).
+    return {
+      ok: false,
+      error: `Could not send the documents on WhatsApp${lastErr ? ` (Twilio ${lastErr})` : ""}.`,
+    };
+  }
+
+  try {
     await client.messages.create({
       from: fromNumber,
       to,
-      body: `${DOC_LABELS[docType] ?? docType} — shipment ${shipment.reference_number}`,
-      mediaUrl: [signed.signedUrl],
+      body: `That's all ${sent} document(s) for shipment ${shipment.reference_number}. Reply APPROVE to approve them all, or tell us what to change.`,
     });
-    sent++;
+  } catch (e) {
+    console.error("whatsapp_approve_prompt_failed", { shipmentId, name: e instanceof Error ? e.name : "unknown" });
   }
-
-  if (sent === 0) return { ok: false, error: "Could not prepare document links" };
-
-  await client.messages.create({
-    from: fromNumber,
-    to,
-    body: `That's all ${sent} document(s) for shipment ${shipment.reference_number}. Reply APPROVE to approve them all, or tell us what to change.`,
-  });
 
   // Don't let a stale/duplicate send knock an already-approved shipment backward
   // (e.g. an operator re-clicking "send" after the customer has approved).
