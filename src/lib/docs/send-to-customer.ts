@@ -95,10 +95,18 @@ export async function sendDocsToCustomerCore(
     body: `That's all ${sent} document(s) for shipment ${shipment.reference_number}. Reply APPROVE to approve them all, or tell us what to change.`,
   });
 
-  await admin
-    .from("shipments")
-    .update({ status: "awaiting_customer_approval" })
-    .eq("id", shipmentId);
+  // Don't let a stale/duplicate send knock an already-approved shipment backward
+  // (e.g. an operator re-clicking "send" after the customer has approved).
+  const FORWARD = [
+    "awaiting_goods_ready", "customer_approved", "filed_with_cha",
+    "customs_cleared", "in_transit", "delivered", "completed", "order_declined", "rejected",
+  ];
+  if (!FORWARD.includes(shipment.status as string)) {
+    await admin
+      .from("shipments")
+      .update({ status: "awaiting_customer_approval" })
+      .eq("id", shipmentId);
+  }
 
   await admin.from("audit_operator_action").insert({
     operator_id: sentBy,

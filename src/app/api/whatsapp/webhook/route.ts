@@ -744,7 +744,7 @@ async function handleGoodsReadyReply(customerId: string, body: string): Promise<
     await autoSendChaIfEnabled(shipmentId, "customer_approved");
   });
 
-  return `🚚 Thanks — goods marked ready for ${ref}. We're handing your documents to your customs broker now.`;
+  return `🚚 Thanks — goods marked ready for ${ref}. Your approved documents are ready for your customs broker.`;
 }
 
 // A shipment parked at awaiting_customer_verify is waiting for the EXPORTER to

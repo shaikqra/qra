@@ -69,6 +69,17 @@ export async function chaRequestChanges(shipmentId: string, note: string): Promi
     console.error("cha_request_changes_failed", { code: error.code });
     return { ok: false, error: "Could not save — please try again." };
   }
+  // Re-open the shipment so the exporter's reply (and the operator's AI-correct)
+  // can actually act on it. Without this the shipment stays at customer_approved /
+  // filed_with_cha, where a WhatsApp reply matches no gate handler and is silently
+  // dropped. awaiting_customer_approval is both operator-correctable and
+  // exporter-re-approvable, so the change request re-enters the pipeline.
+  const admin = createSupabaseServerClient();
+  await admin
+    .from("shipments")
+    .update({ status: "awaiting_customer_approval" })
+    .eq("id", shipmentId)
+    .in("status", ["customer_approved", "filed_with_cha"]);
   // Fence the broker's words inside quotes + an explicit attribution line so a
   // forwarded note can't be mistaken for Qra asking the exporter for something.
   await notifyExporter(

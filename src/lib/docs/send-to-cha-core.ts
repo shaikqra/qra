@@ -167,7 +167,8 @@ export async function sendDocsToChaCore(
     const { error: statusErr } = await admin
       .from("shipments")
       .update({ status: "filed_with_cha" })
-      .eq("id", shipmentId);
+      .eq("id", shipmentId)
+      .eq("status", "customer_approved"); // guard: don't clobber a later state
     if (statusErr) console.error("cha_send_status_write_failed", { shipmentId });
   }
 
