@@ -20,6 +20,7 @@ import { CertList, type CertItem } from "./cert-list";
 import { documentProvenance } from "@/lib/provenance/fields";
 import { ProvenancePanel } from "./provenance-panel";
 import { TrackingCard, type Tracking } from "./tracking-card";
+import { LcCard, type LcReviewItem } from "./lc-card";
 import { PortalChat } from "./portal-chat";
 
 export const dynamic = "force-dynamic";
@@ -208,13 +209,35 @@ export default async function PortalShipment({
     tracking = null;
   }
 
+  // Treasury / LC agent output (LC discrepancy check, stored under the reserved key).
+  let lc: { count: number; discrepancies: LcReviewItem[] } | null = null;
+  try {
+    const parsed = JSON.parse((f(ed, "_lc") || "null"));
+    if (parsed && typeof parsed === "object" && Array.isArray(parsed.discrepancies)) {
+      const items: LcReviewItem[] = parsed.discrepancies
+        .filter((x: unknown): x is Record<string, unknown> => !!x && typeof x === "object")
+        .map((x: Record<string, unknown>) => ({
+          field: typeof x.field === "string" ? x.field : "",
+          severity: x.severity === "high" || x.severity === "low" ? x.severity : "medium",
+          lcRequires: typeof x.lcRequires === "string" ? x.lcRequires : "",
+          documentsShow: typeof x.documentsShow === "string" ? x.documentsShow : "",
+          suggestion: typeof x.suggestion === "string" ? x.suggestion : "",
+        }))
+        .filter((x: LcReviewItem) => x.field);
+      lc = { count: typeof parsed.count === "number" ? parsed.count : items.length, discrepancies: items };
+    }
+  } catch {
+    lc = null;
+  }
+
   // Agent cards: what the fleet is doing on this shipment, from real state.
   const fleet = agentFleet(
     ship.status,
     { pending: !rankedFreight.awarded && rankedFreight.ranked.length > 0, awarded: !!rankedFreight.awarded },
     { ready: certItems.length > 0, count: certItems.length },
     { ready: bookingReady },
-    { ready: !!tracking, summary: tracking?.summary ?? "" }
+    { ready: !!tracking, summary: tracking?.summary ?? "" },
+    { ready: !!lc, count: lc?.count ?? 0 }
   );
 
   // Poll for live agent-card updates only while an agent is actively working (the
@@ -366,6 +389,8 @@ export default async function PortalShipment({
           <CertList items={certItems} source={f(ed, "_certifications_source")} citation={f(ed, "_certifications_citation")} />
 
           <TrackingCard tracking={tracking} />
+
+          <LcCard lc={lc} />
 
           <ProvenancePanel rows={provenance} />
 

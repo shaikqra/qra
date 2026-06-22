@@ -44,10 +44,13 @@ export async function checkRequiredCertsAction(shipmentId: string): Promise<Cert
   const certs = await requiredCertificates(g("product_description"), g("destination_country"), g("hs_code"));
   if (!certs) return { ok: false, error: "Couldn't check certificates — add a product description first." };
 
-  // Persist so the exporter sees it too (same store the auto-run agent uses).
+  // Persist so the exporter sees it too (same store + shape the auto-run agent
+  // uses, so cert-list.tsx renders consistent draft framing on this path too).
   await admin
     .from("shipments")
-    .update({ extracted_data: { ...d, _certifications: JSON.stringify(certs) } })
+    .update({
+      extracted_data: { ...d, _certifications: JSON.stringify(certs), _certifications_source: "draft", _certifications_citation: "" },
+    })
     .eq("id", shipmentId);
 
   return { ok: true, certs };

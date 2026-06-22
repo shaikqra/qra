@@ -70,5 +70,23 @@ export async function checkLcAction(shipmentId: string, lcText: string): Promise
 
   const discrepancies = await checkLcDiscrepancies(lcText, facts);
   if (!discrepancies) return { ok: false, error: "Couldn't run the LC check — try again." };
+
+  // Persist so the exporter's Treasury card lights up and the LC review surfaces
+  // in their console — a clean presentation is what releases their payment.
+  // Stored under the reserved "_lc" key (doc generators read named fields only).
+  await admin
+    .from("shipments")
+    .update({
+      extracted_data: { ...d, _lc: JSON.stringify({ count: discrepancies.length, discrepancies }) },
+    })
+    .eq("id", shipmentId);
+  await admin.from("audit_operator_action").insert({
+    operator_id: session.userId,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "lc_checked", discrepancies: discrepancies.length }, // count only, no PII
+  });
+
   return { ok: true, discrepancies };
 }

@@ -52,7 +52,8 @@ export function agentFleet(
   freight: { pending: boolean; awarded: boolean },
   certs: { ready: boolean; count: number },
   logistics: { ready: boolean },
-  tracking: { ready: boolean; summary: string }
+  tracking: { ready: boolean; summary: string },
+  lc: { ready: boolean; count: number }
 ): AgentCard[] {
   const idx = STAGE[status] ?? 0;
 
@@ -92,6 +93,19 @@ export function agentFleet(
     // Tracking is live once a carrier update has been read for this shipment.
     if (a.key === "tracking" && tracking.ready) {
       return { key: a.key, name: a.name, icon: a.icon, state: "working", note: tracking.summary || "Tracking your shipment" };
+    }
+
+    // Treasury/LC is live once an LC discrepancy check has been run for this shipment.
+    if (a.key === "treasury" && lc.ready) {
+      return lc.count === 0
+        ? { key: a.key, name: a.name, icon: a.icon, state: "done", note: "LC check: documents comply" }
+        : {
+            key: a.key,
+            name: a.name,
+            icon: a.icon,
+            state: "review",
+            note: `LC check: ${lc.count} discrepanc${lc.count === 1 ? "y" : "ies"} to resolve`,
+          };
     }
 
     return { key: a.key, name: a.name, icon: a.icon, state: "later", note: a.note };
