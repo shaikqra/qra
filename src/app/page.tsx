@@ -380,8 +380,8 @@ export default function Home() {
               .
             </p>
           </div>
-          <div className="relative hidden items-center justify-end lg:flex">
-            <div className="relative aspect-square w-[600px] max-w-none lg:-mr-10 xl:-mr-24">
+          <div className="relative flex items-center justify-center lg:justify-end">
+            <div className="relative aspect-square w-[80vw] max-w-[360px] sm:w-[420px] sm:max-w-none lg:w-[600px] lg:-mr-10 xl:-mr-24">
               <div
                 className="pointer-events-none absolute inset-10 rounded-full"
                 style={{ background: "radial-gradient(circle, rgba(74,108,224,0.32), transparent 60%)", filter: "blur(40px)" }}
