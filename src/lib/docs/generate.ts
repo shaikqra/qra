@@ -5,6 +5,8 @@ import { buildPackingListPdf } from "@/lib/pdf/packing-list";
 import { buildCertificateOfOriginPdf } from "@/lib/pdf/certificate-of-origin";
 import { buildShippingBillPackPdf } from "@/lib/pdf/shipping-bill-pack";
 import { buildExportDeclarationPdf } from "@/lib/pdf/export-declaration";
+import { buildLcCoverPdf } from "@/lib/pdf/lc-cover";
+import { DOC_LABELS } from "@/lib/docs/send-to-cha-core";
 import { isEuDestination } from "@/lib/docs/destinations";
 import { readDraftedFields } from "@/lib/docs/verify-gate";
 
@@ -22,6 +24,7 @@ const COO_GENERATOR = "pdf-lib / certificate-of-origin@v1";
 const PROFORMA_GENERATOR = "pdf-lib / proforma-invoice@v1";
 const SBPACK_GENERATOR = "pdf-lib / shipping-bill-pack@v1";
 const EXPORT_DECL_GENERATOR = "pdf-lib / export-declaration@v1";
+const LC_COVER_GENERATOR = "pdf-lib / lc-cover-letter@v1";
 
 const DEMO_SELLER = {
   name: "[Exporter — set in Settings]",
@@ -74,7 +77,8 @@ async function storeDocument(opts: {
     | "certificate_of_origin"
     | "proforma_invoice"
     | "shipping_bill_pack"
-    | "export_declaration";
+    | "export_declaration"
+    | "lc_cover_letter";
   fileSlug: string;
   generator: string;
   pdfBytes: Uint8Array;
@@ -483,6 +487,81 @@ export async function generateShippingBillPackCore(
     docType: "shipping_bill_pack",
     fileSlug: "shipping-bill-pack",
     generator: SBPACK_GENERATOR,
+    pdfBytes,
+    sourceData: d,
+    generatedBy,
+  });
+}
+
+// The LC cover letter: the bank-presentation covering letter listing the documents
+// tendered under a Letter of Credit. Built from the LC's own details, which the LC
+// check captured into the reserved "_lc_meta" key — so it can only be generated
+// after that check has run. Never invents a field: whatever the LC didn't state
+// renders as a fill-in line the operator completes by hand.
+export async function generateLcCoverLetterCore(
+  shipmentId: string,
+  generatedBy: string | null
+): Promise<GenerateResult> {
+  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  if (!shipment) return { ok: false, error: "Shipment not found" };
+
+  const prof = (k: string) => (p[k] ?? "").trim();
+
+  // Read the LC details captured by the LC check. Precondition: at least the LC
+  // number or the issuing bank must be present, else there is nothing to build on.
+  let meta: { lc_number?: string; issuing_bank?: string; applicant?: string } = {};
+  try {
+    const parsed = JSON.parse((d["_lc_meta"] ?? "").trim() || "null");
+    if (parsed && typeof parsed === "object") meta = parsed as typeof meta;
+  } catch {
+    meta = {};
+  }
+  const lcNumber = String(meta.lc_number ?? "").trim();
+  const issuingBank = String(meta.issuing_bank ?? "").trim();
+  const applicant = String(meta.applicant ?? "").trim();
+  if (!lcNumber && !issuingBank) {
+    return { ok: false, error: "Run the LC check first — the cover letter is built from the LC's details." };
+  }
+
+  // Documents presented = the latest generated document of each type (excluding
+  // the cover letter itself), listed by their exporter-facing labels.
+  const { data: gdocs } = await admin
+    .from("generated_documents")
+    .select("doc_type")
+    .eq("shipment_id", shipmentId)
+    .order("generated_at", { ascending: false });
+  const seen = new Set<string>();
+  const documents: string[] = [];
+  for (const row of (gdocs ?? []) as { doc_type: string }[]) {
+    if (row.doc_type === "lc_cover_letter" || seen.has(row.doc_type)) continue;
+    seen.add(row.doc_type);
+    documents.push(DOC_LABELS[row.doc_type] ?? row.doc_type);
+  }
+
+  // The amount drawn = the shipment's invoice value; banks reconcile the
+  // presentation against the LC's available balance by this figure.
+  const amountDrawn = [(d["value_currency"] ?? "").trim(), (d["value_amount"] ?? "").trim()]
+    .filter(Boolean)
+    .join(" ");
+
+  const pdfBytes = await buildLcCoverPdf({
+    date: new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+    beneficiary: { name: prof("legal_name") || DEMO_SELLER.name, address: prof("address") },
+    reference: shipment.reference_number as string,
+    lcNumber,
+    issuingBank,
+    applicant,
+    amountDrawn,
+    documents,
+  });
+
+  return storeDocument({
+    admin,
+    shipmentId,
+    customerId: shipment.customer_id as string,
+    docType: "lc_cover_letter",
+    fileSlug: "lc-cover-letter",
+    generator: LC_COVER_GENERATOR,
     pdfBytes,
     sourceData: d,
     generatedBy,

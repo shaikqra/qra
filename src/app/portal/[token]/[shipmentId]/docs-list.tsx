@@ -1,15 +1,16 @@
-export type CertItem = { name: string; note: string; issuedBy: string };
+export type DocItem = { name: string; note: string; issuedBy: string };
 
-// The Certification agent's output in the exporter console. When it came from a
-// VERIFIED Trade Graph rule (human-checked + cited) it's framed as more trustworthy
-// but still CHA-confirmed; an AI DRAFT is framed as a prompt to check, never a
-// complete checklist (a missed cert is the dangerous failure). Qra issues none.
-export function CertList({
+// The Required-Documents agent's output in the exporter console — the extra
+// documents this lane needs BEYOND Qra's standard set. When it came from a VERIFIED
+// Trade Graph rule (human-checked + cited) it's framed as more trustworthy but still
+// CHA/buyer-confirmed; an AI DRAFT is framed as a prompt to check, never a complete
+// checklist (a missed document is the dangerous failure). Qra issues/files none.
+export function DocsList({
   items,
   source,
   citation,
 }: {
-  items: CertItem[];
+  items: DocItem[];
   source: string;
   citation: string;
 }) {
@@ -18,7 +19,7 @@ export function CertList({
   return (
     <section>
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        Certificates to check for
+        Documents to check for
       </h2>
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         {verified && (
@@ -29,15 +30,17 @@ export function CertList({
         <p className="mb-3 text-xs text-slate-500">
           {verified ? (
             <>
-              From Qra&apos;s verified Trade Graph rule for your goods + destination. Still confirm the full set with
-              your CHA before you ship — Qra issues and verifies no certificates.
+              Extra documents beyond your standard set (invoice, packing list, CoO, export declaration), from Qra&apos;s
+              verified Trade Graph rule for your goods + destination. Still confirm the full set with your CHA / buyer
+              before you ship — Qra issues and files no documents.
             </>
           ) : (
             <>
-              A starting-point list for your goods + destination — <span className="font-semibold">not a complete or
-              final checklist.</span> Treat each as &ldquo;check this,&rdquo; and confirm the full set (including
-              anything not shown) with your CHA before you ship. Qra doesn&apos;t issue, verify, or guarantee any
-              certificate, and a required document may be missing from this list.
+              Extra documents beyond your standard set (invoice, packing list, CoO, export declaration) — a
+              starting-point list, <span className="font-semibold">not a complete or final checklist.</span> Treat each
+              as &ldquo;check this,&rdquo; and confirm the full set (including anything not shown) with your CHA / buyer
+              before you ship. Qra doesn&apos;t issue, file, or guarantee any document, and a required one may be missing
+              from this list.
             </>
           )}
         </p>

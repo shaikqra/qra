@@ -4,7 +4,6 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { applyAiCorrection, checkShipmentDocs, checkHsCode } from "./correct-actions";
 import type { DocReviewFlag } from "@/lib/ai/review-documents";
-import type { HsResult } from "@/lib/ai/classify-hs";
 import { DocFacsimile, flaggedKeys } from "./doc-facsimile";
 
 // §12 review-and-correct loop, as the cockpit shows it: a running CHAT. Run the AI

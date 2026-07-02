@@ -3,6 +3,7 @@
 import { getOperatorSession } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { checkLcDiscrepancies, type LcDiscrepancy } from "@/lib/ai/lc-check";
+import { DOC_LABELS } from "@/lib/docs/send-to-cha-core";
 
 type LcResult = { ok: true; discrepancies: LcDiscrepancy[] } | { ok: false; error: string };
 
@@ -50,9 +51,36 @@ export async function checkLcAction(shipmentId: string, lcText: string): Promise
     .maybeSingle();
   const beneficiary = ((profile?.legal_name as string) ?? "").trim();
 
+  // Computed here (not by the model) so the DATES check has a fixed "now".
+  // IST (UTC+5:30) — a UTC date is a day behind before 5:30am for Indian users.
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+
+  // The documents Qra has generated for this shipment (latest set), by type. The
+  // examiner compares this against the LC's required-documents clause. We also pull
+  // the most recent commercial invoice's generation date to pass as "Invoice date".
+  const { data: gdocs } = await admin
+    .from("generated_documents")
+    .select("doc_type, generated_at")
+    .eq("shipment_id", shipmentId)
+    .order("generated_at", { ascending: false });
+  const generatedTypes = new Set<string>();
+  let invoiceDate = "";
+  for (const row of (gdocs ?? []) as { doc_type: string; generated_at: string }[]) {
+    // The cover letter is built FROM this list — it never presents itself.
+    if (row.doc_type === "lc_cover_letter") continue;
+    generatedTypes.add(row.doc_type);
+    if (!invoiceDate && row.doc_type === "commercial_invoice") {
+      invoiceDate = String(row.generated_at ?? "").slice(0, 10);
+    }
+  }
+  // "(none generated yet)" so the model can tell an empty list from a missing one.
+  const generatedDocNames =
+    [...generatedTypes].map((t) => DOC_LABELS[t] ?? t).join(", ") || "(none generated yet)";
+
   const facts = [
+    ["Today's date", today],
     ["Beneficiary (exporter)", beneficiary],
-    ["Applicant / consignee (buyer)", g("buyer_name")],
+    ["Applicant / buyer (the invoice is addressed to this party)", g("buyer_name")],
     ["Goods description", g("product_description")],
     ["Quantity", [g("quantity"), g("quantity_unit")].filter(Boolean).join(" ")],
     ["Amount", [g("value_currency"), g("value_amount")].filter(Boolean).join(" ")],
@@ -63,21 +91,39 @@ export async function checkLcAction(shipmentId: string, lcText: string): Promise
     ["Net weight", g("net_weight")],
     ["Gross weight", g("gross_weight")],
     ["Number of packages", g("number_of_packages")],
+    ["Invoice date (most recent commercial invoice generated)", invoiceDate],
+    ["Documents Qra has generated for this shipment", generatedDocNames],
   ]
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
 
-  const discrepancies = await checkLcDiscrepancies(lcText, facts);
-  if (!discrepancies) return { ok: false, error: "Couldn't run the LC check — try again." };
+  const checked = await checkLcDiscrepancies(lcText, facts);
+  if (!checked) return { ok: false, error: "Couldn't run the LC check — try again." };
+  const { discrepancies, meta } = checked;
 
   // Persist so the exporter's Treasury card lights up and the LC review surfaces
   // in their console — a clean presentation is what releases their payment.
-  // Stored under the reserved "_lc" key (doc generators read named fields only).
+  // Stored under the reserved "_lc" key (doc generators read named fields only);
+  // "_lc_meta" carries the LC's own identifying details (number, issuing bank,
+  // applicant) so the cover-letter generator can build the bank presentation.
+  // Re-fetch the freshest extracted_data before merging — the AI call above is
+  // slow enough for a concurrent write (gap-fill reply, tracking update) to land,
+  // and merging onto the stale early read would silently erase it.
+  const { data: fresh } = await admin
+    .from("shipments")
+    .select("extracted_data")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  const freshD = (fresh?.extracted_data ?? d) as Record<string, string>;
   await admin
     .from("shipments")
     .update({
-      extracted_data: { ...d, _lc: JSON.stringify({ count: discrepancies.length, discrepancies }) },
+      extracted_data: {
+        ...freshD,
+        _lc: JSON.stringify({ count: discrepancies.length, discrepancies }),
+        _lc_meta: JSON.stringify(meta),
+      },
     })
     .eq("id", shipmentId);
   await admin.from("audit_operator_action").insert({

@@ -19,6 +19,6 @@ export async function generateCertificateOfOrigin(shipmentId: string): Promise<R
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("generateCertificateOfOrigin failed:", msg);
-    return { ok: false, error: `Generation failed: ${msg}` };
+    return { ok: false, error: "Generation failed — please try again." };
   }
 }

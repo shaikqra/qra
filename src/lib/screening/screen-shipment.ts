@@ -89,7 +89,8 @@ export async function screenShipmentParties(
   });
 
   if (toScreen.length === 0) {
-    await note({ event: "sanctions_screening_unavailable", reason: "no_party_name" });
+    const recorded = await note({ event: "sanctions_screening_unavailable", reason: "no_party_name" });
+    if (!recorded) console.error("sanctions_unavailable_not_recorded", { shipmentId });
     return { proceed: false, flagged: true };
   }
 
@@ -106,23 +107,25 @@ export async function screenShipmentParties(
       ...allHits.flatMap((h) => h.matches.map((m) => m.score ?? 0)),
       0
     );
-    await note({
+    const recorded = await note({
       event: "sanctions_potential_match",
       // Tiering is an operator triage signal, never a release decision:
       // weak matches still stop the pipeline and still need a human.
       match_strength: strongest >= 0.95 ? "strong" : "weak",
       flagged_parties: allHits,
     });
+    if (!recorded) console.error("sanctions_match_not_recorded", { shipmentId });
     console.log("sanctions_match_flagged", { shipmentId, partyCount: allHits.length });
     return { proceed: false, flagged: true };
   }
 
   if (unavailable.size > 0) {
-    await note({
+    const recorded = await note({
       event: "sanctions_screening_unavailable",
       reason: "lists_unavailable",
       providers: [...unavailable],
     });
+    if (!recorded) console.error("sanctions_unavailable_not_recorded", { shipmentId });
     console.log("sanctions_screening_unavailable", { shipmentId });
     return { proceed: false, flagged: true };
   }

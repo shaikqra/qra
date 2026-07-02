@@ -23,13 +23,14 @@ async function revertClaim(
     .eq("status", "filed_with_cha");
 }
 
-const DOC_LABELS: Record<string, string> = {
+export const DOC_LABELS: Record<string, string> = {
   commercial_invoice: "Commercial Invoice",
   packing_list: "Packing List",
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
   shipping_bill_pack: "Shipping Bill Data Sheet",
   export_declaration: "Export Declaration / Annexure",
+  lc_cover_letter: "LC Cover Letter",
 };
 
 // Email the latest generated document of each type to the exporter's customs
@@ -92,6 +93,10 @@ export async function sendDocsToChaCore(
 
   const latest = new Map<string, string>();
   for (const doc of (docs ?? []) as { doc_type: string; storage_path: string }[]) {
+    // The LC cover letter is the exporter's letter to their ISSUING BANK — the
+    // CHA files customs and has no role in LC presentation, so it stays out of
+    // the filing pack (the exporter gets it via portal / customer send).
+    if (doc.doc_type === "lc_cover_letter") continue;
     if (!latest.has(doc.doc_type)) latest.set(doc.doc_type, doc.storage_path);
   }
   if (latest.size === 0) {

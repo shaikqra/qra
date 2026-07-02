@@ -15,6 +15,14 @@ export type DraftRule = {
 
 type Result = { ok: true } | { ok: false; error: string };
 
+// Friendly labels for the rule types the Trade Graph holds. Both share the same
+// {name, note, issuedBy} row shape, so one card verifies either kind — only the
+// heading changes. Unknown types fall back to the raw rule_type string.
+const RULE_TYPE_LABELS: Record<string, string> = {
+  required_certs: "Certificates",
+  required_docs: "Required documents",
+};
+
 function toRows(payload: unknown): Cert[] {
   const arr = Array.isArray(payload) ? payload : [];
   const rows = arr.map((c) => {
@@ -53,7 +61,9 @@ function DraftCard({ rule }: { rule: DraftRule }) {
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <div className="flex items-baseline justify-between gap-3">
         <div className="font-mono text-sm font-semibold text-zinc-900">{rule.lane_key}</div>
-        <div className="text-[11px] uppercase tracking-wide text-zinc-400">{rule.rule_type}</div>
+        <div className="text-[11px] uppercase tracking-wide text-zinc-400">
+          {RULE_TYPE_LABELS[rule.rule_type] ?? rule.rule_type}
+        </div>
       </div>
       <p className="mt-1 text-xs text-zinc-500">Edit the AI draft, then verify with its source.</p>
 
@@ -90,7 +100,7 @@ function DraftCard({ rule }: { rule: DraftRule }) {
           </div>
         ))}
         <button onClick={addRow} className="self-start text-xs font-semibold text-emerald-700 hover:text-emerald-800">
-          + Add certificate
+          + Add row
         </button>
       </div>
 

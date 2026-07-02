@@ -6,6 +6,11 @@ import { portalGenerateDoc } from "./actions";
 
 type Kind = "proforma_invoice" | "certificate_of_origin";
 
+const DOCS: { kind: Kind; label: string }[] = [
+  { kind: "proforma_invoice", label: "Proforma Invoice" },
+  { kind: "certificate_of_origin", label: "Certificate of Origin" },
+];
+
 // Buttons for the two situational documents the exporter generates only if asked:
 // a proforma invoice (a pre-order quote) and a certificate of origin (some
 // destinations need it). On success the new file shows up in the Documents list
@@ -31,16 +36,6 @@ export function OptionalDocs({ token, shipmentId }: { token: string; shipmentId:
     });
   };
 
-  const Btn = ({ kind, label }: { kind: Kind; label: string }) => (
-    <button
-      onClick={() => gen(kind, label)}
-      disabled={pending}
-      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:border-[#3f5bd9] hover:bg-[#eef1fc] disabled:opacity-50"
-    >
-      {busy === kind ? "Generating…" : `Generate ${label}`}
-    </button>
-  );
-
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="text-sm font-semibold text-slate-700">Optional documents</div>
@@ -48,8 +43,16 @@ export function OptionalDocs({ token, shipmentId }: { token: string; shipmentId:
         Generate these only if your buyer or bank asks for them.
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        <Btn kind="proforma_invoice" label="Proforma Invoice" />
-        <Btn kind="certificate_of_origin" label="Certificate of Origin" />
+        {DOCS.map(({ kind, label }) => (
+          <button
+            key={kind}
+            onClick={() => gen(kind, label)}
+            disabled={pending}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:border-[#3f5bd9] hover:bg-[#eef1fc] disabled:opacity-50"
+          >
+            {busy === kind ? "Generating…" : `Generate ${label}`}
+          </button>
+        ))}
       </div>
       {msg && (
         <div className={`mt-2 text-xs ${msg.ok ? "text-emerald-700" : "text-amber-700"}`}>{msg.text}</div>

@@ -26,6 +26,7 @@ const DOC_LABELS: Record<string, string> = {
   proforma_invoice: "Proforma Invoice",
   shipping_bill_pack: "Shipping Bill Data Sheet (for CHA)",
   export_declaration: "Export Declaration / Annexure",
+  lc_cover_letter: "LC Cover Letter",
 };
 
 export function InvoicePanel({

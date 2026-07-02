@@ -149,22 +149,25 @@ export async function extractPoFields(
       ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
       : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 2500,
-    system: SYSTEM_PROMPT,
-    tools: [buildExtractTool()],
-    tool_choice: { type: "tool", name: "record_po_fields" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          fileBlock,
-          { type: "text", text: "Extract the export shipment fields from this document." },
-        ],
-      },
-    ],
-  });
+  const message = await anthropic.messages.create(
+    {
+      model: "claude-sonnet-4-6",
+      max_tokens: 2500,
+      system: SYSTEM_PROMPT,
+      tools: [buildExtractTool()],
+      tool_choice: { type: "tool", name: "record_po_fields" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            fileBlock,
+            { type: "text", text: "Extract the export shipment fields from this document." },
+          ],
+        },
+      ],
+    },
+    { timeout: 30_000 }
+  );
 
   return parseExtractTool(message);
 }
@@ -174,19 +177,22 @@ export async function extractPoFields(
 export async function extractPoFieldsFromText(
   text: string
 ): Promise<{ fields: PoFields; confidence: PoConfidence }> {
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 2500,
-    system: SYSTEM_PROMPT,
-    tools: [buildExtractTool()],
-    tool_choice: { type: "tool", name: "record_po_fields" },
-    messages: [
-      {
-        role: "user",
-        content: `Extract the export shipment fields from this order message:\n\n${text.slice(0, 4000)}`,
-      },
-    ],
-  });
+  const message = await anthropic.messages.create(
+    {
+      model: "claude-sonnet-4-6",
+      max_tokens: 2500,
+      system: SYSTEM_PROMPT,
+      tools: [buildExtractTool()],
+      tool_choice: { type: "tool", name: "record_po_fields" },
+      messages: [
+        {
+          role: "user",
+          content: `Extract the export shipment fields from this order message:\n\n${text.slice(0, 4000)}`,
+        },
+      ],
+    },
+    { timeout: 30_000 }
+  );
 
   return parseExtractTool(message);
 }

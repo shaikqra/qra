@@ -39,10 +39,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // Only bounce actual operators off the login page — a signed-in non-operator
+  // (e.g. a broker with a magic-link session) would otherwise loop between
+  // ensureOperator()'s redirect here and this redirect away.
   if (isLogin && user) {
-    const dashUrl = request.nextUrl.clone();
-    dashUrl.pathname = "/internal/shipments";
-    return NextResponse.redirect(dashUrl);
+    const { data: operator } = await supabase
+      .from("operators")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (operator) {
+      const dashUrl = request.nextUrl.clone();
+      dashUrl.pathname = "/internal/shipments";
+      return NextResponse.redirect(dashUrl);
+    }
   }
 
   // CHA seat: must be signed in. We don't redirect signed-in users away from the

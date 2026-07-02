@@ -52,8 +52,9 @@ const DOC_LABELS: Record<string, string> = {
   packing_list: "Packing List",
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
-  shipping_bill_pack: "Shipping Bill checklist",
+  shipping_bill_pack: "Shipping Bill Data Sheet",
   export_declaration: "Export Declaration",
+  lc_cover_letter: "LC Cover Letter",
 };
 
 const SYSTEM = `You are Qra, a friendly assistant helping an EXPORTER with ONE of their export shipments. Answer using ONLY the SHIPMENT CONTEXT provided.

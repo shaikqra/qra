@@ -19,6 +19,6 @@ export async function generateCommercialInvoice(shipmentId: string): Promise<Res
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("generateCommercialInvoice failed:", msg);
-    return { ok: false, error: `Generation failed: ${msg}` };
+    return { ok: false, error: "Generation failed — please try again." };
   }
 }

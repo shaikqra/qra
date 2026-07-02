@@ -38,7 +38,7 @@ export async function verifyTradeGraphRule(ruleId: string, citation: string, pay
   }
   const certs = sanitizeCerts(payload);
   if (certs.length === 0) {
-    return { ok: false, error: "Keep at least one certificate (with a name) before verifying." };
+    return { ok: false, error: "Keep at least one entry (with a name) before verifying." };
   }
 
   const admin = createSupabaseServerClient();

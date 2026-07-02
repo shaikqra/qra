@@ -11,6 +11,8 @@ import {
   type SupportedMediaType,
 } from "@/lib/ai/extract-po";
 import { isOrderMessage } from "@/lib/ai/classify-order";
+import { assessShipmentStatus } from "@/lib/ai/tracking-agent";
+import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } from "@/lib/docs/required-fields";
 import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
 import { computeProposedValue } from "@/lib/docs/compute-value";
@@ -39,6 +41,9 @@ const SYSTEM_PROMPT = `You are Qra, a helpful AI assistant for Indian exporters.
    sentences.`;
 
 const MAX_INPUT_LENGTH = 1000;
+// A typed purchase order is legitimately long, so it gets a much higher cap than
+// generic chat — but still bounded so an absurd message can't run up model cost.
+const MAX_PO_INPUT_LENGTH = 8000;
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -207,6 +212,7 @@ function extensionFromContentType(ct: string): string {
 }
 
 type POSubmissionResult =
+  | { downloadFailed: true }
   | { duplicate: true; shipmentRef: string }
   | {
       duplicate: false;
@@ -239,6 +245,15 @@ async function handlePOSubmission({
       contentType: media.contentType,
       sha256: createHash("sha256").update(media.bytes).digest("hex"),
     });
+  }
+
+  // Every attachment failed to download (bad/expired Twilio URL, auth, or a
+  // network blip). Don't create a ghost shipment with no file attached — return
+  // a distinct result so the caller asks the customer to resend, instead of
+  // claiming we're "processing" a PO that isn't there.
+  if (downloaded.length === 0) {
+    console.log("po_submission_no_files", { customerId });
+    return { downloadFailed: true };
   }
 
   // Dedup ONLY a single-file message whose fingerprint matches one this
@@ -930,6 +945,151 @@ async function createTextOrderShipment(
   return { shipmentId, shipmentRef };
 }
 
+// Cheap gate: decide whether a plain-text WhatsApp message is a CARRIER / TRACKING
+// update about a shipment already in transit (a forwarded shipping-line email or
+// status: vessel departed/arrived, container milestone, ETA change, gate-in/out, a
+// hold/delay at port) — versus a greeting, a question, a new order, or chit-chat.
+// Conservative: unsure ⇒ false, so it can never hijack a chat reply or a new order.
+// Never logs the body (PII). Modeled on classify-order.ts (Haiku, tiny max_tokens).
+async function isTrackingUpdate(text: string): Promise<boolean> {
+  const trimmed = text.trim();
+  if (trimmed.length < 15) return false;
+  try {
+    const message = await anthropic.messages.create(
+      {
+        model: "claude-haiku-4-5",
+        max_tokens: 80,
+        system:
+          "You decide if a WhatsApp message from an exporter is a CARRIER / SHIPMENT TRACKING update about a shipment already in transit — e.g. a forwarded shipping-line email or status: vessel departed/arrived, a container/booking milestone, an ETA change, gate-in/gate-out, or a hold/delay at port. It is NOT a tracking update if it is a greeting, a general question, a new purchase order, or chit-chat. Be conservative: only say yes when the message clearly reports a shipment's movement or status.",
+        tools: [
+          {
+            name: "classify",
+            description: "Record whether the message is a carrier/tracking update.",
+            input_schema: {
+              type: "object",
+              properties: { is_tracking: { type: "boolean" } },
+              required: ["is_tracking"],
+              additionalProperties: false,
+            },
+          },
+        ],
+        tool_choice: { type: "tool", name: "classify" },
+        messages: [{ role: "user", content: trimmed.slice(0, 1500) }],
+      },
+      { timeout: 30_000 }
+    );
+    const toolUse = message.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+    );
+    const input = (toolUse?.input ?? {}) as { is_tracking?: unknown };
+    return input.is_tracking === true;
+  } catch (err) {
+    // On any classification failure, treat as NOT a tracking update — fall through
+    // to normal order/chat handling rather than acting on a message we can't read.
+    console.error("tracking_classify_failed", {
+      name: err instanceof Error ? err.name : "unknown",
+    });
+    return false;
+  }
+}
+
+// A customer with an in-flight (post-filing) shipment can forward a carrier /
+// tracking update; Qra's Tracking agent reads it into a clean status + ETA and
+// flags demurrage risk. Gated cheaply: ONE indexed query for a post-filing
+// shipment (skips entirely if none), THEN a tiny Haiku classifier — unsure ⇒ not a
+// tracking update, so it falls through. Persists the SAME reserved _tracking shape
+// the operator paste path stores, so the exporter portal + agent-fleet card update
+// identically. Returns a reply when handled, or null to fall through. Never logs
+// the body (PII).
+// KNOWN LIMITATION (not solved here): if several post-filing shipments are live at
+// once, the update is applied to the most-recently-active one (same "newest"
+// convention as the other reply handlers) — a forwarded carrier email doesn't tell
+// us which shipment it names. Also: this runs BEFORE the new-order classifier, so a
+// Haiku false-positive on an order-looking message would consume it as tracking —
+// the prompt explicitly excludes new POs to keep that unlikely.
+async function handleTrackingReply(customerId: string, body: string): Promise<string | null> {
+  const supabase = createSupabaseServerClient();
+
+  // Cheap gate + target in one indexed query: the newest post-filing shipment.
+  const { data: shipment } = await supabase
+    .from("shipments")
+    .select("id, reference_number")
+    .eq("customer_id", customerId)
+    .in("status", ["filed_with_cha", "customs_cleared", "in_transit", "delivered"])
+    .order("updated_at", { ascending: false })
+    .order("reference_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!shipment) return null;
+
+  // Only now — for a customer who actually has something in flight — spend a Haiku
+  // call to decide if this text is a carrier/tracking update. Unsure fails safe.
+  if (!(await isTrackingUpdate(body))) return null;
+
+  const shipmentId = shipment.id as string;
+  const ref = shipment.reference_number as string;
+  const couldntRead = `Thanks — I couldn't read that tracking update for ${ref} automatically. Our team will check it and follow up.`;
+
+  // The Sonnet read below is too slow for Twilio's ~15s webhook window — a slow
+  // read would drop the reply (and its demurrage warning) entirely. So ACK the
+  // customer instantly and run the read + persist in after(), delivering the
+  // final summary via an outbound send — the same pattern the PO pipeline uses.
+  after(async () => {
+    try {
+      // Free days from the awarded carrier, if any — same derivation the operator
+      // path uses, so the demurrage check reads the identical context.
+      const { data: awarded } = await supabase
+        .from("freight_quotes")
+        .select("free_days")
+        .eq("shipment_id", shipmentId)
+        .eq("decision", "awarded")
+        .limit(1)
+        .maybeSingle();
+      const freeDays = awarded?.free_days;
+      const freeDaysNote =
+        freeDays != null ? `Free days at destination (from the awarded carrier): ${freeDays}.` : "";
+
+      const status = await assessShipmentStatus(body.slice(0, 4000), freeDaysNote);
+      if (!status) {
+        // Don't fake success — the agent couldn't read it. Hand it to the team.
+        await notifyCustomerWhatsApp(supabase, customerId, couldntRead);
+        return;
+      }
+
+      // Persist under the reserved _tracking key, merging into the freshest
+      // extracted_data — byte-for-byte the same shape/write the operator path uses.
+      const { data: full } = await supabase
+        .from("shipments")
+        .select("extracted_data")
+        .eq("id", shipmentId)
+        .maybeSingle();
+      const ed = (full?.extracted_data ?? {}) as Record<string, string>;
+      await supabase
+        .from("shipments")
+        .update({ extracted_data: { ...ed, _tracking: JSON.stringify(status) } })
+        .eq("id", shipmentId);
+      await supabase.from("audit_operator_action").insert({
+        operator_id: null, // customer forwarded the update, not an operator
+        shipment_id: shipmentId,
+        action_type: "note",
+        old_value: null,
+        new_value: { event: "tracking_assessed", via: "whatsapp" },
+      });
+
+      let summary = `📍 Update on ${ref}: ${status.summary}`;
+      if (status.riskNote) summary += `\n\n⚠️ ${status.riskNote}`;
+      await notifyCustomerWhatsApp(supabase, customerId, summary);
+    } catch (err) {
+      console.error("tracking_after_failed", {
+        name: err instanceof Error ? err.name : "unknown",
+      });
+      await notifyCustomerWhatsApp(supabase, customerId, couldntRead);
+    }
+  });
+
+  return `📍 Got your update on ${ref} — reading it now, I'll send the status in a moment.`;
+}
+
 export async function POST(req: NextRequest) {
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
   const configuredUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
@@ -983,10 +1143,6 @@ export async function POST(req: NextRequest) {
     return twimlResponse("Sorry, I couldn't read your message. Please try again.");
   }
 
-  if (body.length > MAX_INPUT_LENGTH) {
-    return twimlResponse(`Your message is too long. Please keep it under ${MAX_INPUT_LENGTH} characters.`);
-  }
-
   if (isRateLimited(from)) {
     return twimlResponse("You're sending messages too fast. Please wait a minute and try again.");
   }
@@ -1027,6 +1183,10 @@ export async function POST(req: NextRequest) {
       return twimlResponse("I received your file but had trouble storing it. Please try sending again.");
     }
 
+    if ("downloadFailed" in result) {
+      return twimlResponse("I couldn't download your file — please resend it, and I'll get started.");
+    }
+
     if (result.duplicate) {
       return twimlResponse(
         `I've already got that document (ref ${result.shipmentRef}) and I'm working on it — your documents will arrive here shortly.`
@@ -1051,8 +1211,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // A file was stored but none of it is AI-readable (e.g. a voice note or an
+    // unsupported type), so no pipeline was scheduled. Don't claim we're
+    // processing it — hand it to the operator's review queue (bucket_b_review,
+    // the same status the pipeline uses when it can't proceed automatically, so
+    // it surfaces on the dashboard + review queue) and tell the customer a human
+    // will follow up. Guarded on po_received so we never clobber another state.
+    const admin = createSupabaseServerClient();
+    await admin
+      .from("shipments")
+      .update({ status: "bucket_b_review" })
+      .eq("id", result.shipmentId)
+      .eq("status", "po_received");
+    await admin.from("audit_operator_action").insert({
+      operator_id: null,
+      shipment_id: result.shipmentId,
+      action_type: "note",
+      old_value: null,
+      new_value: { event: "unreadable_media_manual_review" },
+    });
     return twimlResponse(
-      `Got your PO! Saved ${result.fileCount} file(s). Shipment reference: ${result.shipmentRef}. Processing now.${setupNote}`
+      `I've received your PO (ref ${result.shipmentRef}) but I couldn't read it automatically — our team will review it and follow up with you shortly. Nothing you need to do right now.${setupNote}`
     );
   }
 
@@ -1122,6 +1301,29 @@ export async function POST(req: NextRequest) {
     // fall through to normal chat on error
   }
 
+  // No pending gate matched. If this customer has a shipment in flight (post-
+  // filing), the message may be a forwarded carrier / tracking update. Gated
+  // cheaply (one indexed query, then a tiny Haiku classifier) and fails SAFE, so
+  // it sits AFTER the pending gates (approval/verify/gap-fill) and BEFORE the
+  // new-order classifier + chat: a live gate answer or a genuine new PO still wins.
+  try {
+    const trackingReply = await handleTrackingReply(customerId, body);
+    if (trackingReply) return twimlResponse(trackingReply);
+  } catch (err) {
+    console.error("tracking_reply_failed", {
+      name: err instanceof Error ? err.name : "unknown",
+    });
+    // fall through to normal order/chat on error
+  }
+
+  // A typed order can be long (real POs are), so it must NOT be blocked by the
+  // short chat cap below — but still bound what reaches the classifier/extractor
+  // so an absurdly long message can't run up model cost. (Both model calls also
+  // slice their own input as a second line of defence.)
+  if (body.length > MAX_PO_INPUT_LENGTH) {
+    return twimlResponse(`Your message is too long. Please keep it under ${MAX_PO_INPUT_LENGTH} characters.`);
+  }
+
   // No pending shipment matched. Is this a NEW order typed as text (no PDF)?
   // A cheap classifier gates the expensive extraction so chit-chat stays chat.
   try {
@@ -1165,6 +1367,13 @@ export async function POST(req: NextRequest) {
       name: err instanceof Error ? err.name : "unknown",
     });
     // fall through to normal chat on error
+  }
+
+  // Generic chat with Claude is the only path that sends the WHOLE message to
+  // the model, so the short input cap lives HERE — not before the PO paths,
+  // which are legitimately long.
+  if (body.length > MAX_INPUT_LENGTH) {
+    return twimlResponse(`Your message is too long. Please keep it under ${MAX_INPUT_LENGTH} characters.`);
   }
 
   try {

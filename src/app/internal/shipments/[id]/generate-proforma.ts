@@ -19,6 +19,6 @@ export async function generateProformaInvoice(shipmentId: string): Promise<Resul
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("generateProformaInvoice failed:", msg);
-    return { ok: false, error: `Generation failed: ${msg}` };
+    return { ok: false, error: "Generation failed — please try again." };
   }
 }

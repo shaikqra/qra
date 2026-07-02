@@ -19,6 +19,6 @@ export async function generatePackingList(shipmentId: string): Promise<Result> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("generatePackingList failed:", msg);
-    return { ok: false, error: `Generation failed: ${msg}` };
+    return { ok: false, error: "Generation failed — please try again." };
   }
 }

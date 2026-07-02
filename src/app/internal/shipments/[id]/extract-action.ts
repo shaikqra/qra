@@ -59,6 +59,6 @@ export async function extractShipmentFields(shipmentId: string): Promise<Result>
     // Message only — never log the document contents or extracted PII.
     const msg = e instanceof Error ? e.message : String(e);
     console.error("extractShipmentFields failed:", msg);
-    return { ok: false, error: `Extraction failed: ${msg}` };
+    return { ok: false, error: "Extraction failed — please try again." };
   }
 }

@@ -62,6 +62,17 @@ export async function screenPartyName(name: string): Promise<ScreeningResult> {
     }
 
     const results = hasResults ? (data.results ?? []) : [];
+
+    // "clear" needs positive evidence of zero hits. If the API reports hits
+    // (total > 0) but we have no usable, populated results array — missing,
+    // non-array, or an empty array that contradicts the total — fail closed.
+    // Never declare a party clear while the API is reporting matches.
+    if ((data.total ?? 0) > 0 && results.length === 0) {
+      // Count only — never the queried name.
+      console.error("sanctions_screening_hits_no_results", { total: data.total });
+      return { status: "unchecked", provider: PROVIDER, reason: "error" };
+    }
+
     if (results.length === 0) return { status: "clear", provider: PROVIDER };
 
     const matches: ScreeningMatch[] = results.slice(0, 10).map((r) => ({

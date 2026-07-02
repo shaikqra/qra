@@ -21,6 +21,6 @@ export async function approveAndSendDocs(shipmentId: string): Promise<Result> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("approveAndSendDocs failed:", msg);
-    return { ok: false, error: `Send failed: ${msg}` };
+    return { ok: false, error: "Could not send the documents — please try again." };
   }
 }

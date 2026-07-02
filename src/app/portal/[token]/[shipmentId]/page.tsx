@@ -17,6 +17,7 @@ import { agentFleet } from "@/lib/portal/agent-fleet";
 import { AgentFleet } from "./agent-fleet";
 import { LiveRefresh } from "./live-refresh";
 import { CertList, type CertItem } from "./cert-list";
+import { DocsList, type DocItem } from "./docs-list";
 import { documentProvenance } from "@/lib/provenance/fields";
 import { ProvenancePanel } from "./provenance-panel";
 import { TrackingCard, type Tracking } from "./tracking-card";
@@ -31,7 +32,8 @@ const DOC_LABELS: Record<string, string> = {
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
   export_declaration: "Export Declaration / Annexure",
-  shipping_bill_pack: "Shipping Bill Checklist",
+  shipping_bill_pack: "Shipping Bill Data Sheet",
+  lc_cover_letter: "LC Cover Letter",
 };
 
 type Shipment = {
@@ -168,11 +170,23 @@ export default async function PortalShipment({
   const rankedFreight = await loadRankedFreight(admin, shipmentId);
 
   // Provenance: where every value on the documents came from (profile / PO / draft).
-  const { data: profileRow } = await admin
+  // Mirror the profile lookup in src/lib/docs/generate.ts (loadShipmentAndProfile):
+  // prefer this customer's own profile, else fall back to the single default profile.
+  // Without the fallback the panel shows blanks for fields the PDF actually filled
+  // from the default profile.
+  let { data: profileRow } = await admin
     .from("exporter_profiles")
     .select("*")
     .eq("customer_id", customer.id)
     .maybeSingle();
+  if (!profileRow) {
+    const { data: fallback } = await admin
+      .from("exporter_profiles")
+      .select("*")
+      .eq("is_default", true)
+      .maybeSingle();
+    profileRow = fallback;
+  }
   const provenance = documentProvenance(
     (ed ?? {}) as Record<string, string>,
     (profileRow ?? {}) as Record<string, string>
@@ -197,6 +211,25 @@ export default async function PortalShipment({
     }
   } catch {
     certItems = [];
+  }
+
+  // Required-Documents agent output (advisory list, stored under the reserved key).
+  // Same validate-each-entry treatment as certs — never trust the cast.
+  let docItems: DocItem[] = [];
+  try {
+    const parsed = JSON.parse(((ed?.["_required_docs"] as string) ?? "[]"));
+    if (Array.isArray(parsed)) {
+      docItems = parsed
+        .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+        .map((c) => ({
+          name: typeof c.name === "string" ? c.name : "",
+          note: typeof c.note === "string" ? c.note : "",
+          issuedBy: typeof c.issuedBy === "string" ? c.issuedBy : "",
+        }))
+        .filter((c) => c.name);
+    }
+  } catch {
+    docItems = [];
   }
 
   // Logistics + Tracking agent output (stored under reserved keys).
@@ -387,6 +420,8 @@ export default async function PortalShipment({
           </div>
 
           <CertList items={certItems} source={f(ed, "_certifications_source")} citation={f(ed, "_certifications_citation")} />
+
+          <DocsList items={docItems} source={f(ed, "_required_docs_source")} citation={f(ed, "_required_docs_citation")} />
 
           <TrackingCard tracking={tracking} />
 

@@ -76,6 +76,8 @@ function noteActivity(
       return { icon: "📜", text: "Listed the certificates this shipment needs", tone: "text-zinc-700" };
     case "booking_drafted":
       return { icon: "📦", text: "Drafted the inland booking request", tone: "text-zinc-700" };
+    case "booking_request_sent":
+      return { icon: "📦", text: "Sent the inland booking request to a transporter", tone: "text-blue-700" };
     case "tracking_assessed":
       return { icon: "📡", text: "Read a new shipment tracking update", tone: "text-blue-700" };
     case "customer_verify_requested":

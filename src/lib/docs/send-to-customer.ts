@@ -10,7 +10,8 @@ const DOC_LABELS: Record<string, string> = {
   certificate_of_origin: "Certificate of Origin",
   proforma_invoice: "Proforma Invoice",
   export_declaration: "Export Declaration / Annexure",
-  shipping_bill_pack: "Shipping Bill Checklist",
+  shipping_bill_pack: "Shipping Bill Data Sheet",
+  lc_cover_letter: "LC Cover Letter",
 };
 
 // Send the latest generated document of each type to the shipment's customer

@@ -10,6 +10,7 @@ import { VerifyChain } from "./verify-chain";
 import { FreightPanel } from "./freight-panel";
 import { FreightQuotes } from "./freight-quotes";
 import { CertPanel } from "./cert-panel";
+import { DocsPanel } from "./docs-panel";
 import { LcPanel } from "./lc-panel";
 import { TrackingPanel } from "./tracking-panel";
 import { LogisticsPanel } from "./logistics-panel";
@@ -322,6 +323,13 @@ export default async function ShipmentDetailPage({
           Certification
         </h2>
         <CertPanel shipmentId={ship.id} />
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 mb-3">
+          Required documents
+        </h2>
+        <DocsPanel shipmentId={ship.id} />
       </section>
 
       <section>

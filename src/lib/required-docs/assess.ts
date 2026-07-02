@@ -1,16 +1,16 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { requiredCertificates, type RequiredCert } from "@/lib/ai/certification-agent";
+import { requiredDocuments, type RequiredDoc } from "@/lib/ai/required-docs-agent";
 import { laneKey, getVerifiedRule, storeDraftRule } from "@/lib/trade-graph/rules";
 
-// Run the Certification agent on a shipment and STORE the result for the exporter.
-// Trade Graph first: if a VERIFIED rule exists for this lane (destination + HS
-// heading) it's used as-is — instant, cited, no model call. On a miss, the AI
+// Run the Required-Documents agent on a shipment and STORE the result for the
+// exporter. Trade Graph first: if a VERIFIED rule exists for this lane (destination
+// + HS heading) it's used as-is — instant, cited, no model call. On a miss, the AI
 // drafts the list, the draft is queued in the Trade Graph for an analyst to verify
 // once, and the draft is used for now. Stored under reserved keys in extracted_data
 // (doc generators read named fields only, so this never leaks onto a document).
 // Advisory + best-effort: missing data or any failure leaves the shipment unchanged
-// and never blocks document generation.
-export async function assessCertificationsCore(shipmentId: string): Promise<void> {
+// and never blocks document generation. Mirrors assessCertificationsCore exactly.
+export async function assessRequiredDocsCore(shipmentId: string): Promise<void> {
   const admin = createSupabaseServerClient();
   const { data: ship } = await admin
     .from("shipments")
@@ -25,33 +25,33 @@ export async function assessCertificationsCore(shipmentId: string): Promise<void
 
   const lane = laneKey(g("destination_country"), g("hs_code"));
 
-  // A real HS code yields a 4-digit heading and a product-specific lane. With no
-  // HS code the lane collapses to a generic "hsxxxx" placeholder shared by EVERY
-  // HS-less shipment to this destination — so a verified rule there could belong
-  // to an unrelated product. Only trust an authoritative verified rule when we
-  // have a real HS heading; otherwise fall through to the per-product AI draft.
+  // Same gating as certs: only trust an authoritative verified rule when we have a
+  // real 4-digit HS heading. Without an HS code the lane collapses to a generic
+  // "hsxxxx" placeholder shared by every HS-less shipment to this destination, so a
+  // verified rule there could belong to an unrelated product — fall through to the
+  // per-product AI draft instead.
   const hasHsHeading = g("hs_code").replace(/\D/g, "").length >= 4;
 
-  let certs: RequiredCert[] | null = null;
+  let docs: RequiredDoc[] | null = null;
   let source: "verified" | "draft" = "draft";
   let citation = "";
 
   // Trade Graph: a verified rule for this lane is the authoritative, cited answer.
   const verified = hasHsHeading
-    ? await getVerifiedRule<RequiredCert[]>("required_certs", lane)
+    ? await getVerifiedRule<RequiredDoc[]>("required_docs", lane)
     : null;
   if (verified && Array.isArray(verified.payload) && verified.payload.length > 0) {
-    certs = verified.payload;
+    docs = verified.payload;
     source = "verified";
     citation = verified.citation ?? "";
   } else {
-    certs = await requiredCertificates(g("product_description"), g("destination_country"), g("hs_code"));
-    if (certs && certs.length > 0) {
+    docs = await requiredDocuments(g("product_description"), g("destination_country"), g("hs_code"));
+    if (docs && docs.length > 0) {
       // Queue this lane's draft for an analyst to verify once → instant forever.
-      await storeDraftRule("required_certs", lane, certs);
+      await storeDraftRule("required_docs", lane, docs);
     }
   }
-  if (!certs || certs.length === 0) return;
+  if (!docs || docs.length === 0) return;
 
   // Re-fetch the freshest extracted_data before merging — the model call above is
   // slow enough for a concurrent write (a gap-fill reply, another agent) to land,
@@ -68,9 +68,9 @@ export async function assessCertificationsCore(shipmentId: string): Promise<void
     .update({
       extracted_data: {
         ...base,
-        _certifications: JSON.stringify(certs),
-        _certifications_source: source,
-        _certifications_citation: citation,
+        _required_docs: JSON.stringify(docs),
+        _required_docs_source: source,
+        _required_docs_citation: citation,
       },
     })
     .eq("id", shipmentId);
@@ -80,6 +80,6 @@ export async function assessCertificationsCore(shipmentId: string): Promise<void
     shipment_id: shipmentId,
     action_type: "note",
     old_value: null,
-    new_value: { event: "certificates_assessed", count: certs.length, source, lane },
+    new_value: { event: "required_docs_assessed", count: docs.length, source, lane },
   });
 }

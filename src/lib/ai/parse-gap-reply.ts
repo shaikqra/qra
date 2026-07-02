@@ -34,25 +34,28 @@ export async function parseGapReply(
     };
   }
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 500,
-    system: SYSTEM_PROMPT,
-    tools: [
-      {
-        name: "record_fields",
-        description: "Record the shipment fields found in the customer's reply.",
-        input_schema: {
-          type: "object",
-          properties,
-          required: missingKeys,
-          additionalProperties: false,
+  const message = await anthropic.messages.create(
+    {
+      model: "claude-sonnet-4-6",
+      max_tokens: 500,
+      system: SYSTEM_PROMPT,
+      tools: [
+        {
+          name: "record_fields",
+          description: "Record the shipment fields found in the customer's reply.",
+          input_schema: {
+            type: "object",
+            properties,
+            required: missingKeys,
+            additionalProperties: false,
+          },
         },
-      },
-    ],
-    tool_choice: { type: "tool", name: "record_fields" },
-    messages: [{ role: "user", content: replyText }],
-  });
+      ],
+      tool_choice: { type: "tool", name: "record_fields" },
+      messages: [{ role: "user", content: replyText }],
+    },
+    { timeout: 30_000 }
+  );
 
   const toolUse = message.content.find(
     (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"

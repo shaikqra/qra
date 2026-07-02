@@ -3,17 +3,20 @@
 import { getOperatorSession } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { draftBookingRequest, type BookingDraft } from "@/lib/ai/logistics-agent";
+import { sendBookingRequestCore } from "@/lib/logistics/send-booking";
+import { parseBookingConfirmation, type ParsedBookingConfirmation } from "@/lib/ai/parse-booking-confirmation";
 
 type BookingResult = { ok: true; draft: BookingDraft } | { ok: false; error: string };
 
 const RATE_MAX = 6;
+const SEND_RATE_MAX = 4; // tighter cap for OUTBOUND email actions
 const RATE_WINDOW_MS = 60_000;
 const buckets = new Map<string, number[]>();
-function rateLimited(key: string): boolean {
+function rateLimited(key: string, max = RATE_MAX): boolean {
   const now = Date.now();
   const cutoff = now - RATE_WINDOW_MS;
   const hits = (buckets.get(key) ?? []).filter((t) => t > cutoff);
-  if (hits.length >= RATE_MAX) {
+  if (hits.length >= max) {
     buckets.set(key, hits);
     return true;
   }
@@ -72,4 +75,98 @@ export async function draftBookingAction(shipmentId: string): Promise<BookingRes
   });
 
   return { ok: true, draft };
+}
+
+// Send a drafted booking request to a transporter email. Operator reviews the
+// draft, enters the transporter, sends. Writes an audit row (see
+// sendBookingRequestCore). Mirrors sendFreightRfqAction.
+export async function sendBookingRequestAction(
+  shipmentId: string,
+  transporterEmail: string,
+  subject: string,
+  body: string
+): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  if (rateLimited(`bookingsend:${session.userId}`, SEND_RATE_MAX)) {
+    return { ok: false, error: "Please wait a moment and try again." };
+  }
+  const r = await sendBookingRequestCore(shipmentId, session.userId, transporterEmail, subject, body);
+  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.audited) return { ok: true, warning: "Email sent, but logging it failed — please flag this." };
+  return { ok: true };
+}
+
+// Parse a transporter's reply to the booking request. Operator pastes the reply;
+// the Logistics agent reads whether they confirmed, the pickup date, container and
+// cost. Extracts only what the transporter stated (never invents). Advisory only —
+// stores the result inside the existing _booking_draft so the panel shows it after
+// a refresh. Requires a draft to exist first.
+export async function parseBookingReplyAction(
+  shipmentId: string,
+  pastedText: string
+): Promise<{ ok: true; confirmation: ParsedBookingConfirmation } | { ok: false; error: string }> {
+  const session = await getOperatorSession();
+  if (!session) return { ok: false, error: "Not authorized" };
+  if (rateLimited(`bookingparse:${session.userId}`)) return { ok: false, error: "Please wait a moment and try again." };
+  if (!pastedText.trim()) return { ok: false, error: "Paste the transporter's reply first." };
+
+  const admin = createSupabaseServerClient();
+  // A reply only makes sense once a booking request has been drafted/sent. Check
+  // BEFORE spending a paid AI call, and return a friendly nudge if there's no draft.
+  const { data: pre } = await admin
+    .from("shipments")
+    .select("extracted_data")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  if (!pre) return { ok: false, error: "Shipment not found." };
+  const pd = (pre.extracted_data ?? {}) as Record<string, string>;
+  let hasDraft = false;
+  try {
+    const dObj = JSON.parse(pd["_booking_draft"] || "null") as { subject?: string } | null;
+    hasDraft = !!(dObj && dObj.subject);
+  } catch {
+    hasDraft = false;
+  }
+  if (!hasDraft) return { ok: false, error: "Draft and send the booking request first." };
+
+  const parsed = await parseBookingConfirmation(pastedText);
+  if (!parsed) return { ok: false, error: "Couldn't read a reply from that text." };
+
+  // Merge the confirmation onto the reserved _booking_draft key. Re-fetch the
+  // FRESHEST extracted_data first — the parser call above is slow enough for a
+  // concurrent write (send stamp, gap-fill reply, tracking update) to land, and
+  // stamping onto a stale copy would silently erase it.
+  const confirmedAt = new Date().toISOString();
+  try {
+    const { data: fresh } = await admin
+      .from("shipments")
+      .select("extracted_data")
+      .eq("id", shipmentId)
+      .maybeSingle();
+    const d = (fresh?.extracted_data ?? {}) as Record<string, string>;
+    const draftObj = JSON.parse(d["_booking_draft"] || "null") as { subject?: string } | null;
+    if (draftObj && draftObj.subject) {
+      await admin
+        .from("shipments")
+        .update({
+          extracted_data: { ...d, _booking_draft: JSON.stringify({ ...draftObj, confirmation: parsed, confirmedAt }) },
+        })
+        .eq("id", shipmentId);
+    }
+  } catch {
+    // Unreadable draft key — the audit row below is still the durable record.
+  }
+
+  // Audit the parse. No PII beyond the confirmed flag — no dates, cost or notes.
+  const { error: auditErr } = await admin.from("audit_operator_action").insert({
+    operator_id: session.userId,
+    shipment_id: shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "booking_reply_parsed", confirmed: parsed.confirmed },
+  });
+  if (auditErr) console.error("booking_reply_audit_write_failed", { shipmentId });
+
+  return { ok: true, confirmation: parsed };
 }
