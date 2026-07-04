@@ -62,9 +62,10 @@ export async function sendBookingRequestCore(
 
   // Persist "sent" state onto the reserved _booking_draft key the draft already
   // lives under (no new key invented), so the panel shows sent-at after a refresh.
-  // Re-fetch the FRESHEST extracted_data first — the email send above takes long
-  // enough for a concurrent write (gap-fill reply, tracking update) to land, and
-  // stamping onto a stale copy would silently erase it.
+  // Read the current draft, then merge the stamped key back atomically under the
+  // row lock — the email send above takes long enough for a concurrent write
+  // (gap-fill reply, tracking update) to land, and the old read-modify-write of the
+  // whole blob would silently erase it.
   const sentAt = new Date().toISOString();
   try {
     const { data: fresh } = await admin
@@ -75,10 +76,10 @@ export async function sendBookingRequestCore(
     const d = (fresh?.extracted_data ?? {}) as Record<string, string>;
     const draftObj = JSON.parse(d["_booking_draft"] || "null") as { subject?: string } | null;
     if (draftObj && draftObj.subject) {
-      await admin
-        .from("shipments")
-        .update({ extracted_data: { ...d, _booking_draft: JSON.stringify({ ...draftObj, sentAt }) } })
-        .eq("id", shipmentId);
+      await admin.rpc("merge_extracted_data", {
+        p_shipment_id: shipmentId,
+        p_patch: { _booking_draft: JSON.stringify({ ...draftObj, sentAt }) },
+      });
     }
   } catch {
     // Unreadable draft key — the audit row below is still the durable record.

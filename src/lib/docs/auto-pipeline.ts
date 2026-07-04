@@ -129,18 +129,21 @@ export async function runAutoPipeline(args: {
       .eq("id", args.shipmentId)
       .maybeSingle();
     const current = (ship?.extracted_data ?? {}) as Record<string, string>;
-    const merged = { ...current };
+    const patch: Record<string, string> = {};
     for (const [k, v] of Object.entries(fields)) {
-      if (v) merged[k] = v;
+      if (v) patch[k] = v;
     }
     // Persist the per-field confidence under a reserved key so the gap-fill
     // path can re-check it later. Forms and doc generators read named fields
     // only, so this never leaks into a document.
-    merged["_confidence"] = JSON.stringify(confidence);
-    await admin
-      .from("shipments")
-      .update({ extracted_data: merged })
-      .eq("id", args.shipmentId);
+    patch["_confidence"] = JSON.stringify(confidence);
+    const merged = { ...current, ...patch };
+    // Atomic shallow merge under the row lock — only the extracted fields +
+    // _confidence are set; any key written concurrently is preserved.
+    await admin.rpc("merge_extracted_data", {
+      p_shipment_id: args.shipmentId,
+      p_patch: patch,
+    });
     await audit("extract", current, merged);
 
     // Order-confirm gate (email intake only): the PO was passively forwarded,
@@ -245,10 +248,14 @@ export async function runAutoPipeline(args: {
         (confidence as Record<string, number>)["hs_code"] = 0.5;
         merged["_confidence"] = JSON.stringify(confidence);
         merged["_drafted"] = JSON.stringify(["hs_code"]);
-        await admin
-          .from("shipments")
-          .update({ extracted_data: merged })
-          .eq("id", args.shipmentId);
+        await admin.rpc("merge_extracted_data", {
+          p_shipment_id: args.shipmentId,
+          p_patch: {
+            hs_code: merged["hs_code"],
+            _confidence: merged["_confidence"],
+            _drafted: merged["_drafted"],
+          },
+        });
         await admin.from("audit_operator_action").insert({
           operator_id: null,
           shipment_id: args.shipmentId,
@@ -263,10 +270,10 @@ export async function runAutoPipeline(args: {
         // verify gate instead of silently skipping the export declaration + SB
         // checklist (the recurring "2 docs" failure). Never silent.
         merged["_needed"] = JSON.stringify(["hs_code"]);
-        await admin
-          .from("shipments")
-          .update({ extracted_data: merged })
-          .eq("id", args.shipmentId);
+        await admin.rpc("merge_extracted_data", {
+          p_shipment_id: args.shipmentId,
+          p_patch: { _needed: merged["_needed"] },
+        });
         await admin.from("audit_operator_action").insert({
           operator_id: null,
           shipment_id: args.shipmentId,
@@ -302,10 +309,13 @@ export async function runAutoPipeline(args: {
     const allBlocking = Array.from(new Set([...shakyBlocking, ...needed]));
     if (shakyPacking.length > 0) {
       for (const f of shakyPacking) delete merged[f];
-      await admin
-        .from("shipments")
-        .update({ extracted_data: merged })
-        .eq("id", args.shipmentId);
+      // These keys are REMOVED (a weight we don't trust must not ride on a doc), so
+      // this is the one write that deletes rather than sets — p_remove does it
+      // atomically, still preserving any key written concurrently.
+      await admin.rpc("merge_extracted_data", {
+        p_shipment_id: args.shipmentId,
+        p_remove: shakyPacking,
+      });
       await admin.from("audit_operator_action").insert({
         operator_id: null,
         shipment_id: args.shipmentId,

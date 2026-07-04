@@ -62,10 +62,11 @@ export async function draftBookingAction(shipmentId: string): Promise<BookingRes
   if (!draft) return { ok: false, error: "Couldn't draft the booking — add a product description first." };
 
   // Persist the draft so it survives a refresh and the fleet card reflects it.
-  await admin
-    .from("shipments")
-    .update({ extracted_data: { ...d, _booking_draft: JSON.stringify(draft) } })
-    .eq("id", shipmentId);
+  // Atomic merge of just the reserved _booking_draft key — every other key is preserved.
+  await admin.rpc("merge_extracted_data", {
+    p_shipment_id: shipmentId,
+    p_patch: { _booking_draft: JSON.stringify(draft) },
+  });
   await admin.from("audit_operator_action").insert({
     operator_id: session.userId,
     shipment_id: shipmentId,
@@ -147,12 +148,11 @@ export async function parseBookingReplyAction(
     const d = (fresh?.extracted_data ?? {}) as Record<string, string>;
     const draftObj = JSON.parse(d["_booking_draft"] || "null") as { subject?: string } | null;
     if (draftObj && draftObj.subject) {
-      await admin
-        .from("shipments")
-        .update({
-          extracted_data: { ...d, _booking_draft: JSON.stringify({ ...draftObj, confirmation: parsed, confirmedAt }) },
-        })
-        .eq("id", shipmentId);
+      // Atomic merge of just the reserved _booking_draft key — every other key is preserved.
+      await admin.rpc("merge_extracted_data", {
+        p_shipment_id: shipmentId,
+        p_patch: { _booking_draft: JSON.stringify({ ...draftObj, confirmation: parsed, confirmedAt }) },
+      });
     }
   } catch {
     // Unreadable draft key — the audit row below is still the durable record.

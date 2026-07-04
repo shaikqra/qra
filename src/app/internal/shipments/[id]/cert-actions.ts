@@ -46,12 +46,11 @@ export async function checkRequiredCertsAction(shipmentId: string): Promise<Cert
 
   // Persist so the exporter sees it too (same store + shape the auto-run agent
   // uses, so cert-list.tsx renders consistent draft framing on this path too).
-  await admin
-    .from("shipments")
-    .update({
-      extracted_data: { ...d, _certifications: JSON.stringify(certs), _certifications_source: "draft", _certifications_citation: "" },
-    })
-    .eq("id", shipmentId);
+  // Atomic merge of just the reserved cert keys — every other key is preserved.
+  await admin.rpc("merge_extracted_data", {
+    p_shipment_id: shipmentId,
+    p_patch: { _certifications: JSON.stringify(certs), _certifications_source: "draft", _certifications_citation: "" },
+  });
 
   return { ok: true, certs };
 }

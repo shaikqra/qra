@@ -53,27 +53,18 @@ export async function assessRequiredDocsCore(shipmentId: string): Promise<void> 
   }
   if (!docs || docs.length === 0) return;
 
-  // Re-fetch the freshest extracted_data before merging — the model call above is
-  // slow enough for a concurrent write (a gap-fill reply, another agent) to land,
-  // and merging onto the stale early read would silently erase it.
-  const { data: fresh } = await admin
-    .from("shipments")
-    .select("extracted_data")
-    .eq("id", shipmentId)
-    .maybeSingle();
-  const base = (fresh?.extracted_data ?? d) as Record<string, string>;
-
-  await admin
-    .from("shipments")
-    .update({
-      extracted_data: {
-        ...base,
-        _required_docs: JSON.stringify(docs),
-        _required_docs_source: source,
-        _required_docs_citation: citation,
-      },
-    })
-    .eq("id", shipmentId);
+  // Atomic shallow merge under the row lock — the model call above is slow enough
+  // for a concurrent write (a gap-fill reply, another agent) to land, and the old
+  // read-modify-write would silently erase it. Only the reserved doc keys are set;
+  // every other key is preserved by the merge.
+  await admin.rpc("merge_extracted_data", {
+    p_shipment_id: shipmentId,
+    p_patch: {
+      _required_docs: JSON.stringify(docs),
+      _required_docs_source: source,
+      _required_docs_citation: citation,
+    },
+  });
 
   await admin.from("audit_operator_action").insert({
     operator_id: null,

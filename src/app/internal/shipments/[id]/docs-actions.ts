@@ -47,12 +47,11 @@ export async function checkRequiredDocsAction(shipmentId: string): Promise<DocsR
 
   // Persist so the exporter sees it too (same store + shape the auto-run agent
   // uses, so docs-list.tsx renders consistent draft framing on this path too).
-  await admin
-    .from("shipments")
-    .update({
-      extracted_data: { ...d, _required_docs: JSON.stringify(docs), _required_docs_source: "draft", _required_docs_citation: "" },
-    })
-    .eq("id", shipmentId);
+  // Atomic merge of just the reserved doc keys — every other key is preserved.
+  await admin.rpc("merge_extracted_data", {
+    p_shipment_id: shipmentId,
+    p_patch: { _required_docs: JSON.stringify(docs), _required_docs_source: "draft", _required_docs_citation: "" },
+  });
 
   return { ok: true, docs };
 }

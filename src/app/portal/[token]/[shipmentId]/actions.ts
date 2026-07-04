@@ -136,7 +136,15 @@ export async function portalVerifyOrder(
       const conf = readStoredConfidence(merged);
       for (const k of changed) conf[k] = 0.99;
       merged["_confidence"] = JSON.stringify(conf);
-      await admin.from("shipments").update({ extracted_data: merged }).eq("id", shipmentId);
+      // Atomic shallow merge of just the corrected fields + the recomputed markers,
+      // so a concurrent write to any other key is preserved.
+      const patch: Record<string, string> = {
+        _drafted: merged["_drafted"],
+        _needed: merged["_needed"],
+        _confidence: merged["_confidence"],
+      };
+      for (const k of changed) patch[k] = merged[k];
+      await admin.rpc("merge_extracted_data", { p_shipment_id: shipmentId, p_patch: patch });
       await admin.from("audit_operator_action").insert({
         operator_id: null,
         shipment_id: shipmentId,

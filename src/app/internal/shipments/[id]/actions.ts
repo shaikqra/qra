@@ -54,16 +54,33 @@ export async function saveShipmentExtraction(
     return { ok: false, error: "Shipment not found" };
   }
 
-  const cleanedExtracted: Record<string, string> = {};
+  // The patch is the 25 VISIBLE form fields only — kept INCLUDING blanks (as "")
+  // so the operator can clear a field (a merge can't delete a key, but it can set
+  // it to ""). Reserved underscore keys (_lc, _tracking, _booking_draft, ...) are
+  // never in the form, so they're filtered out here and the merge leaves them
+  // untouched — the old whole-blob write wiped them on every Save (the data-loss bug).
+  const patch: Record<string, string> = {};
   for (const [k, v] of Object.entries(input.extractedData)) {
-    const trimmed = (v ?? "").trim();
-    if (trimmed) cleanedExtracted[k] = trimmed;
+    if (k.startsWith("_")) continue;
+    patch[k] = (v ?? "").trim();
+  }
+
+  const prevExtracted = (current.extracted_data ?? {}) as Record<string, string>;
+  const mergedExtracted = { ...prevExtracted, ...patch };
+
+  // extracted_data via the atomic merge (reserved keys preserved). status + notes
+  // are real columns — updated directly, exactly as before.
+  const { error: mergeErr } = await supabase.rpc("merge_extracted_data", {
+    p_shipment_id: input.shipmentId,
+    p_patch: patch,
+  });
+  if (mergeErr) {
+    return { ok: false, error: "Could not save changes" };
   }
 
   const { error: updateErr } = await supabase
     .from("shipments")
     .update({
-      extracted_data: cleanedExtracted,
       status: input.status,
       notes: input.notes.trim() || null,
     })
@@ -81,13 +98,17 @@ export async function saveShipmentExtraction(
     new_value: unknown;
   }[] = [];
 
-  if (JSON.stringify(current.extracted_data) !== JSON.stringify(cleanedExtracted)) {
+  // Audit the ACTUAL stored state: old = prior full blob, new = the merged blob.
+  // Reserved keys are identical in both (the patch never touches them), so they're
+  // never falsely reported as changed — only the visible fields the operator edited
+  // show a diff.
+  if (JSON.stringify(prevExtracted) !== JSON.stringify(mergedExtracted)) {
     audits.push({
       operator_id: session.userId,
       shipment_id: input.shipmentId,
       action_type: "extract",
-      old_value: current.extracted_data,
-      new_value: cleanedExtracted,
+      old_value: prevExtracted,
+      new_value: mergedExtracted,
     });
   }
 
@@ -122,15 +143,14 @@ export async function saveShipmentExtraction(
   // If the operator changed a party name, re-run denied-party screening on the
   // new names. A flag forces the shipment back to sanctions review regardless
   // of the status they picked — a newly-entered party can't skip the check.
-  const prev = (current.extracted_data ?? {}) as Record<string, string>;
   const partyChanged = PARTY_KEYS.some(
-    (k) => (prev[k] ?? "").trim() !== (cleanedExtracted[k] ?? "").trim()
+    (k) => (prevExtracted[k] ?? "").trim() !== (patch[k] ?? "").trim()
   );
   if (partyChanged) {
     try {
       const screening = await screenShipmentParties(
         input.shipmentId,
-        partiesFromExtracted(cleanedExtracted)
+        partiesFromExtracted(mergedExtracted)
       );
       // Don't yank back a shipment the operator deliberately rejected — that's
       // already a stronger decision than "needs screening".

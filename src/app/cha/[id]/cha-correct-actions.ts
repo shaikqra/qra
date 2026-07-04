@@ -88,16 +88,17 @@ export async function chaApplyCorrection(
   const oldValue = (current[correction.field] ?? "").toString();
   const merged = { ...current, [correction.field]: correction.value };
 
-  // Service-role write (broker has no write RLS). Guard on the status we read so a
-  // correction can't land on a pack that moved on between the read and the write.
+  // Service-role write (broker has no write RLS). Atomic merge of just the one
+  // corrected field, guarded on the status we read (p_expected_status) so a
+  // correction can't land on a pack that moved on between the read and the write —
+  // the RPC returns false when the guard fails.
   const admin = createSupabaseServerClient();
-  const { data: saved, error: updErr } = await admin
-    .from("shipments")
-    .update({ extracted_data: merged })
-    .eq("id", shipmentId)
-    .eq("status", status)
-    .select("id");
-  if (updErr || !saved || saved.length === 0) {
+  const { data: applied, error: updErr } = await admin.rpc("merge_extracted_data", {
+    p_shipment_id: shipmentId,
+    p_patch: { [correction.field]: correction.value },
+    p_expected_status: status,
+  });
+  if (updErr || !applied) {
     return { ok: false, error: "Couldn't apply the change — the shipment may have moved on." };
   }
 

@@ -110,6 +110,18 @@ export async function portalChat(token: string, shipmentId: string, message: str
     certs = [];
   }
 
+  let reqDocs: string[] = [];
+  try {
+    const parsed = JSON.parse(d["_required_docs"] ?? "[]");
+    if (Array.isArray(parsed)) {
+      reqDocs = parsed
+        .map((c) => (c && typeof c === "object" ? String((c as { name?: string }).name ?? "") : ""))
+        .filter(Boolean);
+    }
+  } catch {
+    reqDocs = [];
+  }
+
   const ctx = [
     `Reference: ${ship.reference_number ?? shipmentId}`,
     `Status: ${status} — ${STATUS_NOTE[status] ?? ""}`,
@@ -123,6 +135,7 @@ export async function portalChat(token: string, shipmentId: string, message: str
       : "",
     docNames.length ? `Documents prepared: ${docNames.join(", ")}` : "No documents prepared yet.",
     certs.length ? `Certificates flagged: ${certs.join(", ")}` : "",
+    reqDocs.length ? `Extra documents likely needed (advisory — CHA to confirm): ${reqDocs.join(", ")}` : "",
   ].filter(Boolean);
 
   try {

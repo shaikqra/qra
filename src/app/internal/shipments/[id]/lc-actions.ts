@@ -107,25 +107,16 @@ export async function checkLcAction(shipmentId: string, lcText: string): Promise
   // Stored under the reserved "_lc" key (doc generators read named fields only);
   // "_lc_meta" carries the LC's own identifying details (number, issuing bank,
   // applicant) so the cover-letter generator can build the bank presentation.
-  // Re-fetch the freshest extracted_data before merging — the AI call above is
-  // slow enough for a concurrent write (gap-fill reply, tracking update) to land,
-  // and merging onto the stale early read would silently erase it.
-  const { data: fresh } = await admin
-    .from("shipments")
-    .select("extracted_data")
-    .eq("id", shipmentId)
-    .maybeSingle();
-  const freshD = (fresh?.extracted_data ?? d) as Record<string, string>;
-  await admin
-    .from("shipments")
-    .update({
-      extracted_data: {
-        ...freshD,
-        _lc: JSON.stringify({ count: discrepancies.length, discrepancies }),
-        _lc_meta: JSON.stringify(meta),
-      },
-    })
-    .eq("id", shipmentId);
+  // Atomic merge under the row lock — the AI call above is slow enough for a
+  // concurrent write (gap-fill reply, tracking update) to land, and the old
+  // read-modify-write would silently erase it. Only the two _lc keys are set.
+  await admin.rpc("merge_extracted_data", {
+    p_shipment_id: shipmentId,
+    p_patch: {
+      _lc: JSON.stringify({ count: discrepancies.length, discrepancies }),
+      _lc_meta: JSON.stringify(meta),
+    },
+  });
   await admin.from("audit_operator_action").insert({
     operator_id: session.userId,
     shipment_id: shipmentId,

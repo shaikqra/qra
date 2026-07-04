@@ -470,11 +470,13 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
     const found = await parseGapReply(body.slice(0, 1000), missingPacking);
     if (Object.keys(found).length > 0) {
       const merged = { ...current, ...found };
-      await supabase
-        .from("shipments")
-        .update({ extracted_data: merged })
-        .eq("id", shipmentId)
-        .eq("status", "awaiting_customer_approval");
+      // Atomic shallow merge, still guarded on the status so a stale/duplicate
+      // reply can't add packing to a shipment that already moved past approval.
+      await supabase.rpc("merge_extracted_data", {
+        p_shipment_id: shipmentId,
+        p_patch: found,
+        p_expected_status: "awaiting_customer_approval",
+      });
       await supabase.from("audit_operator_action").insert({
         operator_id: null,
         shipment_id: shipmentId,
@@ -525,17 +527,19 @@ async function finishAndGenerate(
   supabase: ReturnType<typeof createSupabaseServerClient>,
   shipmentId: string,
   ref: string,
-  merged: Record<string, string>,
   opts: { fromStatus?: string; skipLowConfidence?: boolean } = {}
 ): Promise<string> {
   const fromStatus = opts.fromStatus ?? "awaiting_customer_info";
 
-  // Persist the now-complete data, then re-run the FULL pipeline from it — so the
-  // HS auto-classify, the verify gate, sanctions screening, the certification agent
-  // and document generation ALL run. This used to be a hand-rolled copy of the
-  // pipeline's tail that drifted out of sync: it skipped the HS step entirely for
-  // gap-fill POs, silently costing the export declaration + shipping-bill checklist.
-  await supabase.from("shipments").update({ extracted_data: merged }).eq("id", shipmentId);
+  // The caller has already persisted the completed data (each path does its own
+  // status-guarded merge, or passes data the row already holds), so the row is
+  // complete here — deliberately don't re-write it. Writing a caller's read-time
+  // snapshot back would clobber any concurrent write to a key it didn't touch (e.g.
+  // an advisory agent's _certifications). Just claim the transition and re-run the
+  // FULL pipeline from the stored row — so the HS auto-classify, the verify gate,
+  // sanctions screening, the certification agent and document generation ALL run.
+  // (A hand-rolled copy of the pipeline's tail used to drift out of sync and
+  // silently skip the HS step for gap-fill POs.)
 
   // Claim the transition once so two replies can't both kick off processing.
   const { data: claimed } = await supabase
@@ -595,8 +599,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
       return finishAndGenerate(
         supabase,
         stuck.id as string,
-        stuck.reference_number as string,
-        (stuck.extracted_data ?? {}) as Record<string, string>
+        stuck.reference_number as string
       );
     }
     return null;
@@ -628,11 +631,13 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
 
   if (foundCount > 0) {
     const merged = { ...current, ...found };
-    await supabase
-      .from("shipments")
-      .update({ extracted_data: merged })
-      .eq("id", shipmentId)
-      .eq("status", "awaiting_customer_info");
+    // Atomic shallow merge, still guarded on the status so a stale/duplicate reply
+    // can't fill a shipment that already moved past the gap-fill gate.
+    await supabase.rpc("merge_extracted_data", {
+      p_shipment_id: shipmentId,
+      p_patch: found,
+      p_expected_status: "awaiting_customer_info",
+    });
 
     await supabase.from("audit_operator_action").insert({
       operator_id: null, // customer provided the values
@@ -664,7 +669,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
     });
 
     if (stillMissing.length === 0) {
-      return await finishAndGenerate(supabase, shipmentId, ref, merged);
+      return await finishAndGenerate(supabase, shipmentId, ref);
     }
 
     return (
@@ -805,11 +810,19 @@ async function handleVerifyReply(customerId: string, body: string): Promise<stri
     const conf = readStoredConfidence(merged);
     for (const k of changed) conf[k] = 0.99;
     merged["_confidence"] = JSON.stringify(conf);
-    await supabase
-      .from("shipments")
-      .update({ extracted_data: merged })
-      .eq("id", shipmentId)
-      .eq("status", "awaiting_customer_verify");
+    // Atomic shallow merge of just the corrected fields + the recomputed markers,
+    // still guarded on the status so a stale reply can't correct a shipment that
+    // already left the verify gate.
+    await supabase.rpc("merge_extracted_data", {
+      p_shipment_id: shipmentId,
+      p_patch: {
+        ...found,
+        _drafted: merged["_drafted"],
+        _needed: merged["_needed"],
+        _confidence: merged["_confidence"],
+      },
+      p_expected_status: "awaiting_customer_verify",
+    });
     // Audit the correction by field NAME only — never dump the full extracted_data
     // (PII: buyer, value, addresses) into the trail.
     await supabase.from("audit_operator_action").insert({
@@ -825,7 +838,7 @@ async function handleVerifyReply(customerId: string, body: string): Promise<stri
   // values). finishAndGenerate skips the low-confidence check but still rejects a
   // malformed field — re-asking here — and still runs sanctions screening.
   if (isApprovalMessage(body) || Object.keys(found).length > 0) {
-    return await finishAndGenerate(supabase, shipmentId, ref, merged, {
+    return await finishAndGenerate(supabase, shipmentId, ref, {
       fromStatus: "awaiting_customer_verify",
       skipLowConfidence: true,
     });
@@ -1056,18 +1069,13 @@ async function handleTrackingReply(customerId: string, body: string): Promise<st
         return;
       }
 
-      // Persist under the reserved _tracking key, merging into the freshest
-      // extracted_data — byte-for-byte the same shape/write the operator path uses.
-      const { data: full } = await supabase
-        .from("shipments")
-        .select("extracted_data")
-        .eq("id", shipmentId)
-        .maybeSingle();
-      const ed = (full?.extracted_data ?? {}) as Record<string, string>;
-      await supabase
-        .from("shipments")
-        .update({ extracted_data: { ...ed, _tracking: JSON.stringify(status) } })
-        .eq("id", shipmentId);
+      // Persist under the reserved _tracking key via an atomic shallow merge —
+      // byte-for-byte the same shape the operator path writes, but the merge under
+      // the row lock preserves any key written concurrently.
+      await supabase.rpc("merge_extracted_data", {
+        p_shipment_id: shipmentId,
+        p_patch: { _tracking: JSON.stringify(status) },
+      });
       await supabase.from("audit_operator_action").insert({
         operator_id: null, // customer forwarded the update, not an operator
         shipment_id: shipmentId,
