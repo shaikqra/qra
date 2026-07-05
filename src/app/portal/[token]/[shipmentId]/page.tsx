@@ -41,6 +41,8 @@ type Shipment = {
   reference_number: string;
   status: string;
   extracted_data: Record<string, unknown> | null;
+  cha_review_status: string | null;
+  cha_review_note: string | null;
 };
 
 function f(d: Record<string, unknown> | null, k: string): string {
@@ -125,7 +127,7 @@ export default async function PortalShipment({
   // Scope to THIS customer — a shipment id from another exporter must 404.
   const { data } = await admin
     .from("shipments")
-    .select("id, reference_number, status, extracted_data")
+    .select("id, reference_number, status, extracted_data, cha_review_status, cha_review_note")
     .eq("id", shipmentId)
     .eq("customer_id", customer.id)
     .maybeSingle();
@@ -315,6 +317,13 @@ export default async function PortalShipment({
     }));
   }
 
+  // If the CHA bounced the docs back for a change, the approve gate reopens —
+  // surface their note so the exporter knows WHY, not just "approve again".
+  const chaChangeNote =
+    ship.status === "awaiting_customer_approval" && ship.cha_review_status === "changes_requested"
+      ? (ship.cha_review_note ?? "").trim() || null
+      : null;
+
   return (
     <div className="flex flex-col gap-6">
       <GateActions
@@ -324,6 +333,7 @@ export default async function PortalShipment({
         verifyLines={verifyLines}
         verifyFields={verifyFields}
         infoHint={ship.status === "awaiting_customer_info" ? hint : null}
+        chaChangeNote={chaChangeNote}
       />
 
       {/* Top bar */}

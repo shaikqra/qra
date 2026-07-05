@@ -70,6 +70,7 @@ export function GateActions({
   verifyLines = [],
   verifyFields = [],
   infoHint = null,
+  chaChangeNote = null,
 }: {
   token: string;
   shipmentId: string;
@@ -77,6 +78,7 @@ export function GateActions({
   verifyLines?: string[];
   verifyFields?: VerifyField[];
   infoHint?: string | null;
+  chaChangeNote?: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -88,6 +90,15 @@ export function GateActions({
 
   const gate = gateFor(status, infoHint);
   if (!gate) return null;
+
+  // CHA bounced the docs back with a note → the approve gate reopens in the
+  // "changes requested" (amber) variant so the exporter sees WHY before re-approving.
+  const chaChange =
+    gate.kind === "approve" && typeof chaChangeNote === "string" && chaChangeNote.trim() !== "";
+  const title = chaChange ? "Your CHA requested a change" : gate.title;
+  const subtitle = chaChange
+    ? "We've reopened your documents — review the update below, then re-approve to send them back to your CHA."
+    : gate.subtitle;
 
   function run(fn: () => Promise<Result>) {
     setError(null);
@@ -110,22 +121,26 @@ export function GateActions({
     run(() => portalVerifyOrder(token, shipmentId, has ? corrections : undefined));
   }
 
-  const accentBtn = {
-    confirm: "bg-[#3f5bd9] hover:bg-[#3349be]",
-    verify: "bg-amber-600 hover:bg-amber-700",
-    approve: "bg-[#3f5bd9] hover:bg-[#3349be]",
-    goods: "bg-[#3f5bd9] hover:bg-[#3349be]",
-    close: "bg-[#3f5bd9] hover:bg-[#3349be]",
-    info: "bg-sky-600 hover:bg-sky-700",
-  }[gate.kind];
-  const accentBorder = {
-    confirm: "border-[#3f5bd9]",
-    verify: "border-amber-500",
-    approve: "border-[#3f5bd9]",
-    goods: "border-[#3f5bd9]",
-    close: "border-[#3f5bd9]",
-    info: "border-sky-500",
-  }[gate.kind];
+  const accentBtn = chaChange
+    ? "bg-amber-600 hover:bg-amber-700"
+    : {
+        confirm: "bg-[#3f5bd9] hover:bg-[#3349be]",
+        verify: "bg-amber-600 hover:bg-amber-700",
+        approve: "bg-[#3f5bd9] hover:bg-[#3349be]",
+        goods: "bg-[#3f5bd9] hover:bg-[#3349be]",
+        close: "bg-[#3f5bd9] hover:bg-[#3349be]",
+        info: "bg-sky-600 hover:bg-sky-700",
+      }[gate.kind];
+  const accentBorder = chaChange
+    ? "border-amber-500"
+    : {
+        confirm: "border-[#3f5bd9]",
+        verify: "border-amber-500",
+        approve: "border-[#3f5bd9]",
+        goods: "border-[#3f5bd9]",
+        close: "border-[#3f5bd9]",
+        info: "border-sky-500",
+      }[gate.kind];
 
   const changed = verifyFields.some((f) => (vals[f.key] ?? "").trim() !== f.value);
 
@@ -136,7 +151,7 @@ export function GateActions({
           onClick={() => setOpen(true)}
           className={`w-full rounded-xl border-2 ${accentBorder} bg-white px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50`}
         >
-          ⚠ Action needed: {gate.title} — tap to review
+          ⚠ Action needed: {title} — tap to review
         </button>
       )}
 
@@ -148,7 +163,7 @@ export function GateActions({
         >
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-3">
-              <h3 className="text-base font-semibold text-slate-900">{gate.title}</h3>
+              <h3 className="text-base font-semibold text-slate-900">{title}</h3>
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Dismiss"
@@ -157,7 +172,14 @@ export function GateActions({
                 ✕
               </button>
             </div>
-            <p className="mt-1 text-sm text-slate-500">{gate.subtitle}</p>
+            <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+
+            {chaChange && (
+              <div className="mt-3 rounded-lg border border-amber-500 bg-amber-50 p-3 text-xs text-amber-900">
+                <div className="font-semibold">Their note:</div>
+                <div className="mt-1 italic break-words">&ldquo;{chaChangeNote}&rdquo;</div>
+              </div>
+            )}
 
             {gate.kind === "verify" && (
               <div className="mt-3 space-y-3">
