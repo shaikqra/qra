@@ -7,7 +7,7 @@ import { resolveCustomerByPortalToken, portalWriteRateLimited } from "@/lib/port
 import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline";
 import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
 import { generateProformaInvoiceCore, generateCertificateOfOriginCore } from "@/lib/docs/generate";
-import { validateExtracted } from "@/lib/docs/validate";
+import { validateExtracted, verifyConfirmedSnapshot } from "@/lib/docs/validate";
 import { readDraftedFields, readNeededFields, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { negotiateTargetFor } from "@/lib/freight/rank-quotes";
@@ -17,7 +17,7 @@ type Result = { ok: true } | { ok: false; error: string };
 // The fields the verify gate can flag — the only ones a console correction may
 // touch (a reply can't rewrite an arbitrary field). Mirrors FIELD_LABELS.
 const ALLOWED_VERIFY_FIELDS = new Set([
-  "buyer_name", "product_description", "quantity", "value_amount", "value_currency",
+  "buyer_name", "product_description", "quantity", "value_amount", "unit_price", "value_currency",
   "incoterm", "hs_code", "number_of_packages", "package_type", "net_weight", "gross_weight",
 ]);
 
@@ -101,16 +101,23 @@ export async function portalVerifyOrder(
 
   const admin = createSupabaseServerClient();
 
+  // Snapshot the values the exporter is confirming (their PRE-correction, shown
+  // values) so an unchanged flagged value doesn't re-trigger the gate and loop
+  // forever. A field they CHANGE re-validates, because its new value ≠ this
+  // snapshot. Persisted under the reserved key _verify_confirmed alongside any
+  // corrections, before the resume is claimed.
+  const { data: ship } = await admin
+    .from("shipments")
+    .select("extracted_data")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  const original = (ship?.extracted_data ?? {}) as Record<string, string>;
+  const patch: Record<string, string> = { _verify_confirmed: verifyConfirmedSnapshot(original) };
+
   // Corrections typed in the console pop-up: apply only to fields the verify gate
   // can flag, re-validate the format of each, and — since the exporter supplied
   // them — drop the Qra-draft marker and lift their confidence before resuming.
   if (corrections && Object.keys(corrections).length > 0) {
-    const { data: ship } = await admin
-      .from("shipments")
-      .select("extracted_data")
-      .eq("id", shipmentId)
-      .maybeSingle();
-    const original = (ship?.extracted_data ?? {}) as Record<string, string>;
     const merged = { ...original };
     const changed: string[] = [];
     for (const [k, raw] of Object.entries(corrections)) {
@@ -136,15 +143,10 @@ export async function portalVerifyOrder(
       const conf = readStoredConfidence(merged);
       for (const k of changed) conf[k] = 0.99;
       merged["_confidence"] = JSON.stringify(conf);
-      // Atomic shallow merge of just the corrected fields + the recomputed markers,
-      // so a concurrent write to any other key is preserved.
-      const patch: Record<string, string> = {
-        _drafted: merged["_drafted"],
-        _needed: merged["_needed"],
-        _confidence: merged["_confidence"],
-      };
+      patch["_drafted"] = merged["_drafted"];
+      patch["_needed"] = merged["_needed"];
+      patch["_confidence"] = merged["_confidence"];
       for (const k of changed) patch[k] = merged[k];
-      await admin.rpc("merge_extracted_data", { p_shipment_id: shipmentId, p_patch: patch });
       await admin.from("audit_operator_action").insert({
         operator_id: null,
         shipment_id: shipmentId,
@@ -154,6 +156,9 @@ export async function portalVerifyOrder(
       });
     }
   }
+  // Atomic shallow merge of the confirmed snapshot + any corrected fields/markers,
+  // so a concurrent write to any other key is preserved.
+  await admin.rpc("merge_extracted_data", { p_shipment_id: shipmentId, p_patch: patch });
 
   const { data: claimed } = await admin
     .from("shipments")

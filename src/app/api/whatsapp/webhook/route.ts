@@ -16,7 +16,7 @@ import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } from "@/lib/docs/required-fields";
 import { missingFieldLines, isValueConfirmation } from "@/lib/docs/gap-message";
 import { computeProposedValue } from "@/lib/docs/compute-value";
-import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
+import { validateExtracted, lowConfidenceFields, verifyConfirmedSnapshot } from "@/lib/docs/validate";
 import {
   verifyAskMessage,
   verifyKeys,
@@ -838,6 +838,15 @@ async function handleVerifyReply(customerId: string, body: string): Promise<stri
   // values). finishAndGenerate skips the low-confidence check but still rejects a
   // malformed field — re-asking here — and still runs sanctions screening.
   if (isApprovalMessage(body) || Object.keys(found).length > 0) {
+    // Snapshot the values they're confirming (their PRE-correction, shown values)
+    // so an unchanged ambiguous/mismatched value doesn't re-flag on the resume and
+    // loop the gate; a value they CHANGED re-validates (new value ≠ this snapshot).
+    // Status-guarded like the correction merge above.
+    await supabase.rpc("merge_extracted_data", {
+      p_shipment_id: shipmentId,
+      p_patch: { _verify_confirmed: verifyConfirmedSnapshot(current) },
+      p_expected_status: "awaiting_customer_verify",
+    });
     return await finishAndGenerate(supabase, shipmentId, ref, {
       fromStatus: "awaiting_customer_verify",
       skipLowConfidence: true,

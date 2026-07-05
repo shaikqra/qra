@@ -13,6 +13,7 @@ const FIELD_LABELS: Record<string, string> = {
   product_description: "Goods",
   quantity: "Quantity",
   value_amount: "Invoice value",
+  unit_price: "Unit price",
   value_currency: "Currency",
   incoterm: "Incoterm",
   hs_code: "HS code",

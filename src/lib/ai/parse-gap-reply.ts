@@ -17,6 +17,7 @@ Rules:
 const EXTRA_HINTS: Record<string, string> = {
   hs_code: "HS / HSN tariff code — digits only (e.g. 09083120)",
   incoterm: "Incoterm (FOB, CIF, CFR, EXW, DAP...)",
+  unit_price: "Per-unit price as a plain number, no thousands separators (e.g. 1635 or 0.80)",
 };
 
 // Read the customer's free-text reply and extract values for the fields we
