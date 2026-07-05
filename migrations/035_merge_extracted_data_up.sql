@@ -46,7 +46,10 @@ begin
            (coalesce(extracted_data, '{}'::jsonb) || coalesce(p_patch, '{}'::jsonb))
            - coalesce(p_remove, array[]::text[])
    where id = p_shipment_id
-     and (p_expected_status is null or status = p_expected_status);
+     -- status is the shipment_status ENUM; cast to text to compare with the text
+     -- param (Postgres has no built-in enum = text operator — omitting the cast
+     -- makes the whole statement fail to plan on first call, breaking every write).
+     and (p_expected_status is null or status::text = p_expected_status);
   get diagnostics v_updated = row_count;
   return v_updated > 0;
 end;
