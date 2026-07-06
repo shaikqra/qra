@@ -1,7 +1,8 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import type { PoFields, PoConfidence } from "@/lib/ai/extract-po";
-import { generateCoreDocSet } from "@/lib/docs/generate";
+import { generateCoreDocSet, hasOwnLegalIdentity } from "@/lib/docs/generate";
+import { createInvite } from "@/lib/onboarding";
 import { missingRequiredFields, missingPackingFields, OPTIONAL_PACKING_LABELS } from "@/lib/docs/required-fields";
 import { missingFieldLines } from "@/lib/docs/gap-message";
 import { sendDocsToCustomerCore } from "@/lib/docs/send-to-customer";
@@ -284,6 +285,31 @@ export async function runAutoPipeline(args: {
       }
     }
 
+    // Destination country unlocks the export declaration + shipping-bill data
+    // sheet (and decides the EU origin claim), but a PO doesn't always state it.
+    // Unlike the HS code we NEVER guess or infer a country — a wrong destination
+    // misfiles the shipment and can assert a false EU origin — so if it's blank,
+    // ASK the exporter for it at the verify gate (the SAME _needed path the HS
+    // code uses) instead of silently skipping those two customs documents. Merged
+    // onto any existing _needed so an HS ask and a destination ask surface together.
+    // Skipped on a verified resume (skipLowConfidence) so the gate can't loop on a
+    // country not yet supplied.
+    if (!args.skipLowConfidence && !(merged["destination_country"] ?? "").trim()) {
+      const needed = Array.from(new Set([...readNeededFields(merged), "destination_country"]));
+      merged["_needed"] = JSON.stringify(needed);
+      await admin.rpc("merge_extracted_data", {
+        p_shipment_id: args.shipmentId,
+        p_patch: { _needed: merged["_needed"] },
+      });
+      await admin.from("audit_operator_action").insert({
+        operator_id: null,
+        shipment_id: args.shipmentId,
+        action_type: "note",
+        old_value: null,
+        new_value: { event: "destination_country_needed" },
+      });
+    }
+
     // Trust gate: deterministic rules + extraction confidence. Anything the
     // rules reject or the model wasn't sure about goes to the operator —
     // the agent may not act on data it can't vouch for.
@@ -380,6 +406,58 @@ export async function runAutoPipeline(args: {
     if (!screening.proceed) {
       await setStatus("sanctions_screening");
       return;
+    }
+
+    // Identity gate: every document carries the exporter's OWN legal identity —
+    // their IEC on their own shipping bill (the T&C liability model). We must never
+    // stamp another tenant's identity onto a customs document, so if this customer
+    // hasn't completed their own company profile (legal name + IEC), HOLD for
+    // onboarding instead of generating with a borrowed or blank identity. Routes to
+    // the operator review queue (bucket_b_review, an existing status — no new enum)
+    // and asks the exporter to complete their profile, reusing the onboarding-invite
+    // link + WhatsApp notify.
+    const { data: idRow } = await admin
+      .from("shipments")
+      .select("customer_id, reference_number")
+      .eq("id", args.shipmentId)
+      .maybeSingle();
+    if (idRow) {
+      const { data: prof } = await admin
+        .from("exporter_profiles")
+        .select("legal_name, iec")
+        .eq("customer_id", idRow.customer_id as string)
+        .maybeSingle();
+      if (!hasOwnLegalIdentity((prof ?? {}) as Record<string, string>)) {
+        await setStatus("bucket_b_review");
+        await admin.from("audit_operator_action").insert({
+          operator_id: null,
+          shipment_id: args.shipmentId,
+          action_type: "note",
+          old_value: null,
+          new_value: { event: "awaiting_exporter_profile" },
+        });
+        const invite = await createInvite(idRow.customer_id as string);
+        const link = "url" in invite ? invite.url : null;
+        const notified = await notifyCustomerWhatsApp(
+          admin,
+          idRow.customer_id as string,
+          `📋 Your PO (ref ${idRow.reference_number}) is ready — I just need your company details first (legal name + IEC) so your documents carry YOUR own identity.` +
+            (link
+              ? `\n\nSet up your company once here (about 5 minutes): ${link}`
+              : `\n\nPlease complete your company profile in your Qra portal, then I'll prepare your documents.`)
+        );
+        if (!notified) {
+          await admin.from("audit_operator_action").insert({
+            operator_id: null,
+            shipment_id: args.shipmentId,
+            action_type: "note",
+            old_value: null,
+            new_value: { event: "exporter_profile_notify_failed" },
+          });
+        }
+        console.log("auto_pipeline_awaiting_profile", { shipmentId: args.shipmentId, notified });
+        return;
+      }
     }
 
     await setStatus("generating_documents");

@@ -39,6 +39,18 @@ export async function sendDocsToCustomerCore(
     .maybeSingle();
   if (!shipment) return { ok: false, error: "Shipment not found" };
 
+  // A shipment parked at sanctions_screening has an UNRESOLVED denied-party hold.
+  // Never send its documents to the customer — the operator must resolve screening
+  // first (move it out of this status, which re-runs the check and fails closed if
+  // still flagged). The auto-pipeline clears the hold before it ever sends, so this
+  // only blocks genuinely-unresolved holds, never the happy path.
+  if (shipment.status === "sanctions_screening") {
+    return {
+      ok: false,
+      error: "Resolve sanctions screening for this shipment before sending documents to the customer.",
+    };
+  }
+
   const { data: customer } = await admin
     .from("customers")
     .select("whatsapp_number")

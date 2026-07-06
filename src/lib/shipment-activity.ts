@@ -84,6 +84,8 @@ function noteActivity(
       return { icon: "📋", text: "Asked the customer to confirm a few details", tone: "text-amber-700" };
     case "hs_code_needed":
       return { icon: "📋", text: "Couldn't read an HS code — asked the customer for it", tone: "text-amber-700" };
+    case "awaiting_exporter_profile":
+      return { icon: "📋", text: "Waiting for the company profile (legal name + IEC) before preparing documents", tone: "text-amber-700" };
     case "freight_rfq_sent":
       return { icon: "🚢", text: "Sent a freight quote-request to a carrier", tone: "text-blue-700" };
     case "freight_quote_added":

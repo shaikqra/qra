@@ -32,6 +32,18 @@ const DEMO_SELLER = {
   iec: "",
 };
 
+// A customer's documents carry THEIR OWN legal identity — their IEC on their own
+// shipping bill (the T&C liability model). The minimum legal identity we require
+// before stamping any customs document is the legal name + IEC. We never borrow
+// another tenant's (or the default) profile, so a customer without these can't have
+// identity-bearing documents generated — the pipeline holds them for onboarding.
+export function hasOwnLegalIdentity(p: Record<string, string>): boolean {
+  return !!(p["legal_name"] ?? "").trim() && !!(p["iec"] ?? "").trim();
+}
+
+export const IDENTITY_REQUIRED_ERROR =
+  "Your company profile isn't complete yet — add your legal name and IEC in Settings before we can prepare export documents.";
+
 async function loadShipmentAndProfile(shipmentId: string) {
   const admin = createSupabaseServerClient();
 
@@ -41,29 +53,24 @@ async function loadShipmentAndProfile(shipmentId: string) {
     .eq("id", shipmentId)
     .maybeSingle();
 
-  if (error || !shipment) return { admin, shipment: null, d: {}, p: {} };
+  if (error || !shipment) return { admin, shipment: null, d: {}, p: {}, identityOk: false };
 
-  // Prefer the profile of this shipment's exporter; fall back to the default
-  // profile for customers that don't have their own yet.
-  let { data: profile } = await admin
+  // Identity/tax/bank/declaration fields come ONLY from THIS customer's own
+  // profile. We never fall back to another tenant's (or the default) profile —
+  // borrowing an IEC breaks the liability model and can get a shipment seized.
+  const { data: profile } = await admin
     .from("exporter_profiles")
     .select("*")
     .eq("customer_id", shipment.customer_id)
     .maybeSingle();
-  if (!profile) {
-    const { data: fallback } = await admin
-      .from("exporter_profiles")
-      .select("*")
-      .eq("is_default", true)
-      .maybeSingle();
-    profile = fallback;
-  }
 
+  const p = (profile ?? {}) as Record<string, string>;
   return {
     admin,
     shipment,
     d: (shipment.extracted_data ?? {}) as Record<string, string>,
-    p: (profile ?? {}) as Record<string, string>,
+    p,
+    identityOk: hasOwnLegalIdentity(p),
   };
 }
 
@@ -124,8 +131,9 @@ async function generateInvoiceVariantCore(
   generatedBy: string | null,
   variant: "commercial" | "proforma"
 ): Promise<GenerateResult> {
-  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  const { admin, shipment, d, p, identityOk } = await loadShipmentAndProfile(shipmentId);
   if (!shipment) return { ok: false, error: "Shipment not found" };
+  if (!identityOk) return { ok: false, error: IDENTITY_REQUIRED_ERROR };
 
   const get = (k: string) => (d[k] ?? "").trim();
   const prof = (k: string) => (p[k] ?? "").trim();
@@ -232,8 +240,9 @@ export async function generatePackingListCore(
   shipmentId: string,
   generatedBy: string | null
 ): Promise<GenerateResult> {
-  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  const { admin, shipment, d, p, identityOk } = await loadShipmentAndProfile(shipmentId);
   if (!shipment) return { ok: false, error: "Shipment not found" };
+  if (!identityOk) return { ok: false, error: IDENTITY_REQUIRED_ERROR };
 
   const get = (k: string) => (d[k] ?? "").trim();
   const prof = (k: string) => (p[k] ?? "").trim();
@@ -291,8 +300,9 @@ export async function generateCertificateOfOriginCore(
   shipmentId: string,
   generatedBy: string | null
 ): Promise<GenerateResult> {
-  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  const { admin, shipment, d, p, identityOk } = await loadShipmentAndProfile(shipmentId);
   if (!shipment) return { ok: false, error: "Shipment not found" };
+  if (!identityOk) return { ok: false, error: IDENTITY_REQUIRED_ERROR };
 
   const get = (k: string) => (d[k] ?? "").trim();
   const prof = (k: string) => (p[k] ?? "").trim();
@@ -356,8 +366,9 @@ export async function generateExportDeclarationCore(
   shipmentId: string,
   generatedBy: string | null
 ): Promise<GenerateResult> {
-  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  const { admin, shipment, d, p, identityOk } = await loadShipmentAndProfile(shipmentId);
   if (!shipment) return { ok: false, error: "Shipment not found" };
+  if (!identityOk) return { ok: false, error: IDENTITY_REQUIRED_ERROR };
 
   const get = (k: string) => (d[k] ?? "").trim();
   const prof = (k: string) => (p[k] ?? "").trim();
@@ -423,8 +434,9 @@ export async function generateShippingBillPackCore(
   shipmentId: string,
   generatedBy: string | null
 ): Promise<GenerateResult> {
-  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  const { admin, shipment, d, p, identityOk } = await loadShipmentAndProfile(shipmentId);
   if (!shipment) return { ok: false, error: "Shipment not found" };
+  if (!identityOk) return { ok: false, error: IDENTITY_REQUIRED_ERROR };
 
   const get = (k: string) => (d[k] ?? "").trim();
   const prof = (k: string) => (p[k] ?? "").trim();
@@ -502,8 +514,9 @@ export async function generateLcCoverLetterCore(
   shipmentId: string,
   generatedBy: string | null
 ): Promise<GenerateResult> {
-  const { admin, shipment, d, p } = await loadShipmentAndProfile(shipmentId);
+  const { admin, shipment, d, p, identityOk } = await loadShipmentAndProfile(shipmentId);
   if (!shipment) return { ok: false, error: "Shipment not found" };
+  if (!identityOk) return { ok: false, error: IDENTITY_REQUIRED_ERROR };
 
   const prof = (k: string) => (p[k] ?? "").trim();
 

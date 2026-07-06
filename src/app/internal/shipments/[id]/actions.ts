@@ -161,9 +161,18 @@ export async function saveShipmentExtraction(
           .eq("id", input.shipmentId);
       }
     } catch {
-      // Screening records its own audit note for handled outcomes; on a thrown
-      // failure, leave a no-PII breadcrumb but never block the save.
+      // On a THROWN screening failure we can't vouch for the new party, so fail
+      // CLOSED: force the shipment back into sanctions review rather than let it
+      // proceed at the operator's chosen status (mirrors the correction paths).
+      // The rejected carve-out matches the flagged branch above — a deliberately
+      // rejected order is already blocked and shouldn't be resurrected. No PII.
       console.error("rescreen_threw", { shipmentId: input.shipmentId });
+      if (input.status !== "rejected") {
+        await supabase
+          .from("shipments")
+          .update({ status: "sanctions_screening" })
+          .eq("id", input.shipmentId);
+      }
     }
   }
 

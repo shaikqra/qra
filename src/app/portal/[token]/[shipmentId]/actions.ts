@@ -6,7 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveCustomerByPortalToken, portalWriteRateLimited } from "@/lib/portal/auth";
 import { runAutoPipeline, loadStoredExtraction } from "@/lib/docs/auto-pipeline";
 import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
-import { generateProformaInvoiceCore, generateCertificateOfOriginCore } from "@/lib/docs/generate";
+import { generateProformaInvoiceCore, generateCertificateOfOriginCore, IDENTITY_REQUIRED_ERROR } from "@/lib/docs/generate";
 import { validateExtracted, verifyConfirmedSnapshot } from "@/lib/docs/validate";
 import { readDraftedFields, readNeededFields, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
@@ -18,7 +18,7 @@ type Result = { ok: true } | { ok: false; error: string };
 // touch (a reply can't rewrite an arbitrary field). Mirrors FIELD_LABELS.
 const ALLOWED_VERIFY_FIELDS = new Set([
   "buyer_name", "product_description", "quantity", "value_amount", "unit_price", "value_currency",
-  "incoterm", "hs_code", "number_of_packages", "package_type", "net_weight", "gross_weight",
+  "incoterm", "hs_code", "destination_country", "number_of_packages", "package_type", "net_weight", "gross_weight",
 ]);
 
 // Authorize a portal write: the token must resolve to a customer, AND that
@@ -535,9 +535,10 @@ export async function portalGenerateDoc(
   if (!result.ok) {
     // Keep the actionable "fill these fields first" hint; never surface a raw
     // storage/DB message to the exporter.
-    const friendly = result.error.startsWith("Fill these fields first")
-      ? result.error
-      : "Couldn't generate that document — please try again in a moment.";
+    const friendly =
+      result.error.startsWith("Fill these fields first") || result.error === IDENTITY_REQUIRED_ERROR
+        ? result.error
+        : "Couldn't generate that document — please try again in a moment.";
     return { ok: false, error: friendly };
   }
 

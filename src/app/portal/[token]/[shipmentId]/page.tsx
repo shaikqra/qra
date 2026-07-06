@@ -172,23 +172,15 @@ export default async function PortalShipment({
   const rankedFreight = await loadRankedFreight(admin, shipmentId);
 
   // Provenance: where every value on the documents came from (profile / PO / draft).
-  // Mirror the profile lookup in src/lib/docs/generate.ts (loadShipmentAndProfile):
-  // prefer this customer's own profile, else fall back to the single default profile.
-  // Without the fallback the panel shows blanks for fields the PDF actually filled
-  // from the default profile.
-  let { data: profileRow } = await admin
+  // Identity fields come ONLY from THIS customer's own profile — we never borrow
+  // another tenant's (mirrors loadShipmentAndProfile in src/lib/docs/generate.ts).
+  // A customer without their own profile shows no identity provenance rather than
+  // someone else's.
+  const { data: profileRow } = await admin
     .from("exporter_profiles")
     .select("*")
     .eq("customer_id", customer.id)
     .maybeSingle();
-  if (!profileRow) {
-    const { data: fallback } = await admin
-      .from("exporter_profiles")
-      .select("*")
-      .eq("is_default", true)
-      .maybeSingle();
-    profileRow = fallback;
-  }
   const provenance = documentProvenance(
     (ed ?? {}) as Record<string, string>,
     (profileRow ?? {}) as Record<string, string>

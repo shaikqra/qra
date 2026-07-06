@@ -17,6 +17,7 @@ const FIELD_LABELS: Record<string, string> = {
   value_currency: "Currency",
   incoterm: "Incoterm",
   hs_code: "HS code",
+  destination_country: "Destination country",
   number_of_packages: "Number of packages",
   package_type: "Package type",
   net_weight: "Net weight",
@@ -89,7 +90,7 @@ export function verifyFieldLines(
     const v = (merged[field] ?? "").trim() || "—";
     if (needed.has(field)) {
       // Missing and not derivable — ask the exporter to provide it (never skip silently).
-      lines.push(`• ${label(field)} — I couldn't read this from your goods. Please reply with it.`);
+      lines.push(`• ${label(field)} — I couldn't find this on your PO. Please reply with it.`);
     } else if (drafted.has(field)) {
       // A field Qra worked out itself (not on the PO) is worded so the exporter
       // confirms the GOODS and passes the code to their CHA — never asked to certify
