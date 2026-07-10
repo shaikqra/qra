@@ -23,9 +23,10 @@ export async function sendDocsToCha(shipmentId: string): Promise<Result> {
               ? "No documents to send — generate documents first."
               : result.reason === "already_sent"
                 ? "These documents were already sent to the CHA."
-                : // "error" carries an operator-safe message (e.g. send is only
-                  // allowed once the customer has approved + confirmed goods ready).
-                  result.reason === "error"
+                : // "error" and "not_approved" carry operator-safe messages (e.g.
+                  // send is only allowed once the customer has approved + confirmed
+                  // goods ready, or a regenerated doc still needs their approval).
+                  result.reason === "error" || result.reason === "not_approved"
                   ? result.error
                   : "Could not send the email to the CHA. Check the Resend setup.";
       return { ok: false, error: friendly };

@@ -1,12 +1,20 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveChaEmail } from "@/lib/cha-contacts";
 import { isAutoSendChaEnabled } from "@/lib/app-settings";
+import { writeAudit } from "@/lib/audit";
 
 export type ChaSendResult =
   | { ok: true; sent: number }
   | {
       ok: false;
-      reason: "no_cha_email" | "no_docs" | "not_configured" | "send_failed" | "already_sent" | "error";
+      reason:
+        | "no_cha_email"
+        | "no_docs"
+        | "not_approved"
+        | "not_configured"
+        | "send_failed"
+        | "already_sent"
+        | "error";
       error: string;
     };
 
@@ -38,11 +46,14 @@ export const DOC_LABELS: Record<string, string> = {
 // operator button (sentBy = operator id) and the automatic post-approval send
 // (sentBy = null = system). Returns a typed reason so callers can tell a real
 // failure from "no CHA email yet" (which should not be treated as an error).
-// requireStatus (automatic path) atomically claims that status transition to
-// filed_with_cha before sending, so the broker is emailed exactly once. The
-// operator (manual) path omits requireStatus and is instead gated below to
-// customer_approved only — so it can't email before both human gates pass, and
-// can't double-send (once sent the status is filed_with_cha, not customer_approved).
+// Two guards make the hand-off safe: (1) every newest-of-type doc must carry an
+// approved_at stamp — the IMMUTABLE per-doc approval artifact, not the editable
+// status flag — so an unapproved or regenerated doc can never reach the broker;
+// and (2) BOTH paths atomically claim the status transition to filed_with_cha
+// BEFORE emailing (the automatic path from requireStatus, the manual path from
+// customer_approved), so the broker is emailed exactly once even under a
+// double-click or a race. A losing claim returns already_sent; a fetch/send
+// failure reverts the claim so it can retry.
 export async function sendDocsToChaCore(
   shipmentId: string,
   sentBy: string | null,
@@ -87,25 +98,47 @@ export async function sendDocsToChaCore(
 
   const { data: docs } = await admin
     .from("generated_documents")
-    .select("doc_type, storage_path, generated_at")
+    .select("doc_type, storage_path, generated_at, approved_at")
     .eq("shipment_id", shipmentId)
     .order("generated_at", { ascending: false });
 
-  const latest = new Map<string, string>();
-  for (const doc of (docs ?? []) as { doc_type: string; storage_path: string }[]) {
+  const latest = new Map<string, { path: string; approvedAt: string | null }>();
+  for (const doc of (docs ?? []) as {
+    doc_type: string;
+    storage_path: string;
+    approved_at: string | null;
+  }[]) {
     // The LC cover letter is the exporter's letter to their ISSUING BANK — the
     // CHA files customs and has no role in LC presentation, so it stays out of
     // the filing pack (the exporter gets it via portal / customer send).
     if (doc.doc_type === "lc_cover_letter") continue;
-    if (!latest.has(doc.doc_type)) latest.set(doc.doc_type, doc.storage_path);
+    if (!latest.has(doc.doc_type)) {
+      latest.set(doc.doc_type, { path: doc.storage_path, approvedAt: doc.approved_at });
+    }
   }
   if (latest.size === 0) {
     return { ok: false, reason: "no_docs", error: "No documents to send." };
   }
 
+  // Gate on the IMMUTABLE approval artifact, not the editable status flag: every
+  // newest-of-type doc must carry an approved_at stamp (only ever set null ->
+  // timestamp, when the customer approved). If any is unstamped — e.g. a doc was
+  // regenerated after approval — refuse the whole send so an unapproved document
+  // can never reach the broker. Applies to BOTH the manual and the automatic path.
+  for (const { approvedAt } of latest.values()) {
+    if (!approvedAt) {
+      return {
+        ok: false,
+        reason: "not_approved",
+        error:
+          "These documents haven't been approved by the customer yet — get their approval before sending to the CHA.",
+      };
+    }
+  }
+
   const attachments: { filename: string; content: string }[] = [];
   const sentTypes: string[] = [];
-  for (const [docType, path] of latest) {
+  for (const [docType, { path }] of latest) {
     const { data: blob, error: dlErr } = await admin.storage.from("generated-docs").download(path);
     if (dlErr || !blob) continue;
     const content = Buffer.from(await blob.arrayBuffer()).toString("base64");
@@ -116,18 +149,20 @@ export async function sendDocsToChaCore(
     return { ok: false, reason: "no_docs", error: "Could not read the documents to send." };
   }
 
-  // Automatic path: claim the status transition so the CHA is emailed exactly
-  // once. A losing claim means another run already handed it over.
-  if (requireStatus) {
-    const { data: claimed } = await admin
-      .from("shipments")
-      .update({ status: "filed_with_cha" })
-      .eq("id", shipmentId)
-      .eq("status", requireStatus)
-      .select("id");
-    if (!claimed || claimed.length === 0) {
-      return { ok: false, reason: "already_sent", error: "Already handed to the CHA." };
-    }
+  // Claim the status transition to filed_with_cha BEFORE emailing, so the CHA is
+  // emailed EXACTLY once — the real double-send guard for BOTH paths. The automatic
+  // path claims from requireStatus; the manual (operator) path claims from
+  // customer_approved. A losing claim (0 rows) means another run/click already
+  // handed it over; a fetch/send failure below reverts it so it can retry.
+  const claimFrom = requireStatus ?? "customer_approved";
+  const { data: claimed } = await admin
+    .from("shipments")
+    .update({ status: "filed_with_cha" })
+    .eq("id", shipmentId)
+    .eq("status", claimFrom)
+    .select("id");
+  if (!claimed || claimed.length === 0) {
+    return { ok: false, reason: "already_sent", error: "Already handed to the CHA." };
   }
 
   const bodyText = [
@@ -156,32 +191,24 @@ export async function sendDocsToChaCore(
     });
   } catch (e) {
     console.error("sendDocsToChaCore fetch failed:", e instanceof Error ? e.name : "unknown");
-    if (requireStatus) await revertClaim(admin, shipmentId, requireStatus);
+    await revertClaim(admin, shipmentId, claimFrom);
     return { ok: false, reason: "send_failed", error: "Could not reach the email service." };
   }
 
   if (!res.ok) {
     console.error("sendDocsToChaCore email failed:", res.status);
-    if (requireStatus) await revertClaim(admin, shipmentId, requireStatus);
+    await revertClaim(admin, shipmentId, claimFrom);
     return { ok: false, reason: "send_failed", error: `Email rejected (code ${res.status}).` };
   }
 
-  // The automatic path already flipped status via the claim; the operator path
-  // sets it now. Either way, the audit row is the durable record of the send.
-  if (!requireStatus) {
-    const { error: statusErr } = await admin
-      .from("shipments")
-      .update({ status: "filed_with_cha" })
-      .eq("id", shipmentId)
-      .eq("status", "customer_approved"); // guard: don't clobber a later state
-    if (statusErr) console.error("cha_send_status_write_failed", { shipmentId });
-  }
-
-  const { error: auditErr } = await admin.from("audit_operator_action").insert({
+  // Both paths already flipped status to filed_with_cha via the atomic claim
+  // above; the audit row is the durable record of the send.
+  // A PII send with no audit row is a compliance hole — never silent.
+  await writeAudit(admin, {
     operator_id: sentBy,
     shipment_id: shipmentId,
     action_type: "status_change",
-    old_value: { status: requireStatus ?? shipment.status },
+    old_value: { status: claimFrom },
     new_value: {
       status: "filed_with_cha",
       emailed_to_cha: true,
@@ -189,8 +216,6 @@ export async function sendDocsToChaCore(
       sent_by: sentBy ? "operator" : "system",
     },
   });
-  // A PII send with no audit row is a compliance hole — never silent.
-  if (auditErr) console.error("cha_send_audit_write_failed", { shipmentId });
 
   return { ok: true, sent: attachments.length };
 }

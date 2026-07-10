@@ -11,6 +11,7 @@ import { validateExtracted, verifyConfirmedSnapshot } from "@/lib/docs/validate"
 import { readDraftedFields, readNeededFields, readStoredConfidence } from "@/lib/docs/verify-gate";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { negotiateTargetFor } from "@/lib/freight/rank-quotes";
+import { writeAudit } from "@/lib/audit";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -62,7 +63,7 @@ export async function portalConfirmOrder(token: string, shipmentId: string): Pro
     .select("id");
   if (!claimed || claimed.length === 0) return { ok: true }; // already moving
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "approve",
@@ -147,7 +148,7 @@ export async function portalVerifyOrder(
       patch["_needed"] = merged["_needed"];
       patch["_confidence"] = merged["_confidence"];
       for (const k of changed) patch[k] = merged[k];
-      await admin.from("audit_operator_action").insert({
+      await writeAudit(admin, {
         operator_id: null,
         shipment_id: shipmentId,
         action_type: "extract",
@@ -168,7 +169,7 @@ export async function portalVerifyOrder(
     .select("id");
   if (!claimed || claimed.length === 0) return { ok: true }; // already moving
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "approve",
@@ -204,7 +205,7 @@ export async function portalDeclineOrder(token: string, shipmentId: string): Pro
     .update({ status: "order_declined" })
     .eq("id", shipmentId)
     .eq("status", "awaiting_order_confirm");
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "note",
@@ -257,7 +258,7 @@ export async function portalApproveDocs(token: string, shipmentId: string): Prom
     .select("id");
   const approvedCount = updated?.length ?? 0;
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "approve",
@@ -302,7 +303,7 @@ export async function portalConfirmGoodsReady(token: string, shipmentId: string)
     .select("id");
   if (!claimed || claimed.length === 0) return { ok: true }; // already moving
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "note",
@@ -397,7 +398,7 @@ export async function portalAwardFreight(token: string, shipmentId: string, quot
   }
   if (!claimed || claimed.length === 0) return { ok: false, error: "This quote can't be awarded right now." };
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "approve",
@@ -427,7 +428,7 @@ export async function portalRejectFreightQuote(token: string, shipmentId: string
     .select("id");
   if (!claimed || claimed.length === 0) return { ok: false, error: "This quote can't be rejected right now." };
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "note",
@@ -458,7 +459,7 @@ export async function portalNegotiateFreight(token: string, shipmentId: string, 
     .select("id");
   if (!claimed || claimed.length === 0) return { ok: false, error: "This quote can't be negotiated right now." };
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "note",
@@ -488,7 +489,7 @@ export async function portalCloseShipment(token: string, shipmentId: string): Pr
     return { ok: false, error: "This shipment can't be closed right now." };
   }
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "status_change",

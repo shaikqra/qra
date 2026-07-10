@@ -12,6 +12,7 @@ import { classifyHsCode } from "@/lib/ai/classify-hs";
 import { assessCertificationsCore } from "@/lib/certifications/assess";
 import { assessRequiredDocsCore } from "@/lib/required-docs/assess";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
+import { writeAudit } from "@/lib/audit";
 
 // A one-line, human-readable summary of the drafted order for the confirm ask.
 // Only safe-to-show business fields; empty string if nothing extracted.
@@ -79,7 +80,7 @@ export async function runAutoPipeline(args: {
     oldValue: unknown,
     newValue: unknown
   ) => {
-    await admin.from("audit_operator_action").insert({
+    await writeAudit(admin, {
       operator_id: null, // system
       shipment_id: args.shipmentId,
       action_type: actionType,
@@ -174,7 +175,7 @@ export async function runAutoPipeline(args: {
         // Parked but the exporter was never reached (no WhatsApp number, a send
         // failure, or a missing row). Surface it so the order isn't invisible
         // work that can never be confirmed — the operator must follow up.
-        await admin.from("audit_operator_action").insert({
+        await writeAudit(admin, {
           operator_id: null,
           shipment_id: args.shipmentId,
           action_type: "note",
@@ -208,7 +209,7 @@ export async function runAutoPipeline(args: {
         if (!notified) {
           // Surface the failed ask on the shipment's audit trail so the
           // operator knows the customer was never contacted.
-          await admin.from("audit_operator_action").insert({
+          await writeAudit(admin, {
             operator_id: null,
             shipment_id: args.shipmentId,
             action_type: "note",
@@ -257,7 +258,7 @@ export async function runAutoPipeline(args: {
             _drafted: merged["_drafted"],
           },
         });
-        await admin.from("audit_operator_action").insert({
+        await writeAudit(admin, {
           operator_id: null,
           shipment_id: args.shipmentId,
           action_type: "note",
@@ -275,7 +276,7 @@ export async function runAutoPipeline(args: {
           p_shipment_id: args.shipmentId,
           p_patch: { _needed: merged["_needed"] },
         });
-        await admin.from("audit_operator_action").insert({
+        await writeAudit(admin, {
           operator_id: null,
           shipment_id: args.shipmentId,
           action_type: "note",
@@ -301,7 +302,7 @@ export async function runAutoPipeline(args: {
         p_shipment_id: args.shipmentId,
         p_patch: { _needed: merged["_needed"] },
       });
-      await admin.from("audit_operator_action").insert({
+      await writeAudit(admin, {
         operator_id: null,
         shipment_id: args.shipmentId,
         action_type: "note",
@@ -342,7 +343,7 @@ export async function runAutoPipeline(args: {
         p_shipment_id: args.shipmentId,
         p_remove: shakyPacking,
       });
-      await admin.from("audit_operator_action").insert({
+      await writeAudit(admin, {
         operator_id: null,
         shipment_id: args.shipmentId,
         action_type: "note",
@@ -362,7 +363,7 @@ export async function runAutoPipeline(args: {
         .eq("id", args.shipmentId)
         .maybeSingle();
       await setStatus("awaiting_customer_verify");
-      await admin.from("audit_operator_action").insert({
+      await writeAudit(admin, {
         operator_id: null,
         shipment_id: args.shipmentId,
         action_type: "note",
@@ -382,7 +383,7 @@ export async function runAutoPipeline(args: {
         if (!notified) {
           // Couldn't reach the exporter — surface it so the order isn't stuck
           // invisibly; the operator can pick it up from the board.
-          await admin.from("audit_operator_action").insert({
+          await writeAudit(admin, {
             operator_id: null,
             shipment_id: args.shipmentId,
             action_type: "note",
@@ -429,7 +430,7 @@ export async function runAutoPipeline(args: {
         .maybeSingle();
       if (!hasOwnLegalIdentity((prof ?? {}) as Record<string, string>)) {
         await setStatus("bucket_b_review");
-        await admin.from("audit_operator_action").insert({
+        await writeAudit(admin, {
           operator_id: null,
           shipment_id: args.shipmentId,
           action_type: "note",
@@ -447,7 +448,7 @@ export async function runAutoPipeline(args: {
               : `\n\nPlease complete your company profile in your Qra portal, then I'll prepare your documents.`)
         );
         if (!notified) {
-          await admin.from("audit_operator_action").insert({
+          await writeAudit(admin, {
             operator_id: null,
             shipment_id: args.shipmentId,
             action_type: "note",
@@ -551,7 +552,7 @@ export async function runAutoPipeline(args: {
     // can't process degrades to a human; it does not vanish at "Order received".
     try {
       await setStatus("bucket_b_review");
-      await admin.from("audit_operator_action").insert({
+      await writeAudit(admin, {
         operator_id: null,
         shipment_id: args.shipmentId,
         action_type: "note",

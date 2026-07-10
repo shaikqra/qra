@@ -28,6 +28,7 @@ import { parseGapReply } from "@/lib/ai/parse-gap-reply";
 import { generateCoreDocSet } from "@/lib/docs/generate";
 import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
 import { createInvite } from "@/lib/onboarding";
+import { writeAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -413,8 +414,29 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
   const message = body.slice(0, 500); // cap stored text
 
   if (isApprovalMessage(body)) {
-    // Record approval on the documents — the schema's designated slot. The
-    // immutability trigger allows only approved_at / approval_message to change.
+    // Mirror the portal approve path exactly. Claim the status transition FIRST —
+    // this is the idempotency guard. Approval moves to the G3 goods-ready gate:
+    // docs approved + locked, but the pack only goes to the CHA once the exporter
+    // confirms the goods are ready. A stale/duplicate APPROVE (e.g. tapped twice)
+    // finds zero rows here and gets a friendly "already approved" reply instead of
+    // dead-ending.
+    const { data: claimed } = await supabase
+      .from("shipments")
+      .update({ status: "awaiting_goods_ready" })
+      .eq("id", shipmentId)
+      .eq("status", "awaiting_customer_approval")
+      .select("id");
+    if (!claimed || claimed.length === 0) {
+      return `✅ Your documents for ${ref} are already approved. When your goods are ready to ship, reply READY and we'll hand everything to your customs broker.`;
+    }
+
+    // Now stamp the approval onto the documents (the immutable per-doc record).
+    // The immutability trigger allows only approved_at / approval_message to change.
+    // On a FIRST approval this stamps every doc; on a RE-approval after a CHA
+    // change-request reopened the gate, the docs already carry their first
+    // approved_at, so this legitimately matches 0 rows — that's FINE, we keep going
+    // (the status claim above is the real gate, and the docs stay locked as first
+    // approved). Only a genuine DB write error must not report success.
     const { data: updated, error: updErr } = await supabase
       .from("generated_documents")
       .update({ approved_at: new Date().toISOString(), approval_message: message })
@@ -423,27 +445,19 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
       .select("id");
     const approvedCount = updated?.length ?? 0;
 
-    // Never tell the customer "approved & locked" unless documents were actually
-    // stamped. On error or an empty set, leave status unchanged so it can retry.
-    if (updErr || approvedCount === 0) {
-      console.error("customer_approval_not_recorded", {
-        shipmentId,
-        hasError: !!updErr,
-        approvedCount,
-      });
+    // A real write failure: don't tell the customer "approved & locked". REVERT the
+    // status claim (reopen the gate) so the reply can retry, then ask them to wait.
+    if (updErr) {
+      console.error("customer_approval_not_recorded", { shipmentId, hasError: true });
+      await supabase
+        .from("shipments")
+        .update({ status: "awaiting_customer_approval" })
+        .eq("id", shipmentId)
+        .eq("status", "awaiting_goods_ready");
       return `Thanks! We're just finalizing the documents for ${ref} — give us a moment and we'll confirm shortly.`;
     }
 
-    // Approval moves to the G3 goods-ready gate — docs approved + locked, but the
-    // pack only goes to the CHA once the exporter confirms the goods are ready.
-    // Guarded on the current status so a stale/duplicate reply can't clobber it.
-    await supabase
-      .from("shipments")
-      .update({ status: "awaiting_goods_ready" })
-      .eq("id", shipmentId)
-      .eq("status", "awaiting_customer_approval");
-
-    await supabase.from("audit_operator_action").insert({
+    await writeAudit(supabase, {
       operator_id: null, // customer acted, not an operator
       shipment_id: shipmentId,
       action_type: "approve",
@@ -477,7 +491,7 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
         p_patch: found,
         p_expected_status: "awaiting_customer_approval",
       });
-      await supabase.from("audit_operator_action").insert({
+      await writeAudit(supabase, {
         operator_id: null,
         shipment_id: shipmentId,
         action_type: "extract",
@@ -507,7 +521,7 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
   // or "thanks" must not change its state. Record the message so the operator can
   // see it and decide whether it's a real change request, then nudge the customer
   // toward the decision. The operator drives any revision from the dashboard.
-  await supabase.from("audit_operator_action").insert({
+  await writeAudit(supabase, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "note",
@@ -639,7 +653,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
       p_expected_status: "awaiting_customer_info",
     });
 
-    await supabase.from("audit_operator_action").insert({
+    await writeAudit(supabase, {
       operator_id: null, // customer provided the values
       shipment_id: shipmentId,
       action_type: "extract",
@@ -649,7 +663,7 @@ async function handleGapFillReply(customerId: string, body: string): Promise<str
 
     // Provenance: a computed-and-confirmed value wasn't printed on the PO.
     if (valueComputed) {
-      await supabase.from("audit_operator_action").insert({
+      await writeAudit(supabase, {
         operator_id: null,
         shipment_id: shipmentId,
         action_type: "note",
@@ -730,18 +744,48 @@ async function handleGoodsReadyReply(customerId: string, body: string): Promise<
     .maybeSingle();
   if (!shipment) return null;
 
-  // Only a clear readiness signal advances it — accept "ready" or a plain yes/ok,
-  // but NOT "approve"/"confirm" (document-approval words that could fire the CHA
-  // hand-off before the goods are actually ready to ship). Block an explicit
-  // refusal ("not ready", "not yet", "isn't ready") — but only when the negation
-  // actually negates readiness, so a stray "no" in a positive reply ("no delays,
-  // goods are ready") still advances. A bare "no" has no readiness word and falls
-  // through the affirmative check below anyway.
+  // Only a clear readiness signal advances it — but NOT "approve"/"confirm"
+  // (document-approval words that could fire the CHA hand-off before the goods are
+  // actually ready to ship). Block an explicit refusal ("not ready", "not yet",
+  // "isn't ready") — but only when the negation actually negates readiness, so a
+  // stray "no" in a positive reply ("no delays, goods are ready") still advances. A
+  // bare "no" has no readiness word and falls through the checks below anyway.
   if (/(?:\bnot|n['’]?t)\s+(?:yet|ready|packed|done|finished|shipped|dispatched)\b/i.test(body)) return null;
-  if (!/\b(ready|good to go|dispatched|shipped|yes|yeah|yep|ok|okay|done)\b/i.test(body)) return null;
+
+  // Distinguish an EXPLICIT readiness statement ("ready", "good to go",
+  // "dispatched", "shipped") from a BARE affirmative ("yes"/"yeah"/"yep"/"ok"/
+  // "okay"/"done"). An explicit word plainly means the goods are ready and always
+  // advances; a bare affirmative is ambiguous — it might have been meant for a
+  // different shipment's gate.
+  const explicitReady = /\b(ready|good to go|dispatched|shipped)\b/i.test(body);
+  const bareAffirmative = /\b(yes|yeah|yep|ok|okay|done)\b/i.test(body);
+  if (!explicitReady && !bareAffirmative) return null;
 
   const shipmentId = shipment.id as string;
   const ref = shipment.reference_number as string;
+
+  // The CHA hand-off is irreversible (it emails the broker), so never fire it on a
+  // GUESS. If the only signal is a bare "yes"/"ok" AND this customer has more than
+  // one shipment live at any gate, a bare affirmative could advance the WRONG one —
+  // so don't; ask them to reply READY to confirm THIS shipment. An explicit
+  // readiness word always advances, and a single live shipment is unambiguous.
+  if (!explicitReady && bareAffirmative) {
+    const { data: live } = await supabase
+      .from("shipments")
+      .select("id")
+      .eq("customer_id", customerId)
+      .in("status", [
+        "awaiting_customer_approval",
+        "awaiting_order_confirm",
+        "awaiting_customer_verify",
+        "awaiting_goods_ready",
+        "awaiting_customer_info",
+      ])
+      .limit(2);
+    if ((live?.length ?? 0) > 1) {
+      return `You have more than one shipment in progress — just to be safe, reply READY to confirm the goods for ${ref} are ready to ship.`;
+    }
+  }
 
   const { data: claimed } = await supabase
     .from("shipments")
@@ -751,7 +795,7 @@ async function handleGoodsReadyReply(customerId: string, body: string): Promise<
     .select("id");
   if (!claimed || claimed.length === 0) return null; // already moving
 
-  await supabase.from("audit_operator_action").insert({
+  await writeAudit(supabase, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "note",
@@ -825,7 +869,7 @@ async function handleVerifyReply(customerId: string, body: string): Promise<stri
     });
     // Audit the correction by field NAME only — never dump the full extracted_data
     // (PII: buyer, value, addresses) into the trail.
-    await supabase.from("audit_operator_action").insert({
+    await writeAudit(supabase, {
       operator_id: null, // customer corrected the values
       shipment_id: shipmentId,
       action_type: "extract",
@@ -893,7 +937,7 @@ async function handleOrderConfirmReply(customerId: string, body: string): Promis
       return `Thanks — I'm already preparing your documents for ${ref}.`;
     }
 
-    await supabase.from("audit_operator_action").insert({
+    await writeAudit(supabase, {
       operator_id: null, // customer confirmed, not an operator
       shipment_id: shipmentId,
       action_type: "approve",
@@ -919,7 +963,7 @@ async function handleOrderConfirmReply(customerId: string, body: string): Promis
       .update({ status: "order_declined" })
       .eq("id", shipmentId)
       .eq("status", "awaiting_order_confirm");
-    await supabase.from("audit_operator_action").insert({
+    await writeAudit(supabase, {
       operator_id: null,
       shipment_id: shipmentId,
       action_type: "note",
@@ -957,7 +1001,7 @@ async function createTextOrderShipment(
     return null;
   }
   const shipmentId = shipment.id as string;
-  await supabase.from("audit_operator_action").insert({
+  await writeAudit(supabase, {
     operator_id: null,
     shipment_id: shipmentId,
     action_type: "note",
@@ -1085,7 +1129,7 @@ async function handleTrackingReply(customerId: string, body: string): Promise<st
         p_shipment_id: shipmentId,
         p_patch: { _tracking: JSON.stringify(status) },
       });
-      await supabase.from("audit_operator_action").insert({
+      await writeAudit(supabase, {
         operator_id: null, // customer forwarded the update, not an operator
         shipment_id: shipmentId,
         action_type: "note",
@@ -1240,7 +1284,7 @@ export async function POST(req: NextRequest) {
       .update({ status: "bucket_b_review" })
       .eq("id", result.shipmentId)
       .eq("status", "po_received");
-    await admin.from("audit_operator_action").insert({
+    await writeAudit(admin, {
       operator_id: null,
       shipment_id: result.shipmentId,
       action_type: "note",

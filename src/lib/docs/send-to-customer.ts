@@ -1,6 +1,7 @@
 import twilio from "twilio";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { NOT_FOR_CUSTOMER } from "@/lib/docs/doc-visibility";
+import { writeAudit } from "@/lib/audit";
 
 export type SendDocsResult = { ok: true; sent: number } | { ok: false; error: string };
 
@@ -141,7 +142,7 @@ export async function sendDocsToCustomerCore(
       .eq("id", shipmentId);
   }
 
-  await admin.from("audit_operator_action").insert({
+  await writeAudit(admin, {
     operator_id: sentBy,
     shipment_id: shipmentId,
     action_type: sentBy ? "approve" : "status_change",
