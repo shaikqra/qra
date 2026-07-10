@@ -9,7 +9,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export type HsResult = { current: string; suggested: string; matches: boolean; note: string };
 
-const SYSTEM_PROMPT = `You classify HS codes for Indian exports. Given a product description and the HS code currently on the shipment, judge whether that code plausibly matches the goods, and give the most appropriate HS code (at least 6 digits; India uses 8). You are ADVISORY — the licensed customs broker is the authority. Be conservative: if the current code already plausibly fits, say it matches.`;
+const SYSTEM_PROMPT = `You classify HS codes for Indian exports. Given a product description and the HS code currently on the shipment, judge whether that code plausibly matches the goods, and give the most appropriate HS code. India files on the 8-digit ITC-HS tariff, so ALWAYS return the full 8-digit Indian ITC-HS code (never a 6-digit international heading). You are ADVISORY — the licensed customs broker is the authority. Be conservative: if the current code already plausibly fits, say it matches.`;
 
 export async function classifyHsCode(product: string, currentHs: string): Promise<HsResult | null> {
   if (!product.trim()) return null;
@@ -26,7 +26,7 @@ export async function classifyHsCode(product: string, currentHs: string): Promis
             input_schema: {
               type: "object",
               properties: {
-                suggested: { type: "string", description: "the most appropriate HS code, digits and dots only" },
+                suggested: { type: "string", description: "the full 8-digit Indian ITC-HS code, digits and dots only" },
                 matches: { type: "boolean", description: "does the current code plausibly match the product" },
                 note: { type: "string", description: "one short line of reasoning" },
               },

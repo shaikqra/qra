@@ -9,6 +9,10 @@ export const REQUIRED_FIELD_LABELS: Record<string, string> = {
   buyer_name: "Buyer name",
   product_description: "Product description",
   quantity: "Quantity",
+  // The unit is required alongside the quantity — a bare "1000" of WHAT must never
+  // print on a customs document (the UQC). Kept in sync with the commercial-invoice
+  // required list in generate.ts.
+  quantity_unit: "Quantity unit",
   value_amount: "Invoice value",
   value_currency: "Currency",
 };

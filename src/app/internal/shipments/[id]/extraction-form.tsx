@@ -32,6 +32,8 @@ const FIELDS: { key: string; label: string; placeholder: string }[] = [
   { key: "seal_no", label: "Seal no.", placeholder: "Seal number" },
   { key: "batch_code", label: "Batch code", placeholder: "Batch / production code" },
   { key: "lot_code", label: "Lot code", placeholder: "Lot number" },
+  { key: "po_date", label: "PO date", placeholder: "YYYY-MM-DD" },
+  { key: "shipment_deadline", label: "Latest shipment date", placeholder: "YYYY-MM-DD" },
 ];
 
 const STATUS_OPTIONS = [

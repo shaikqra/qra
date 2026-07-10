@@ -200,7 +200,12 @@ export async function chaApproveDocs(shipmentId: string): Promise<Result> {
   const { error } = await supabase.rpc("cha_approve_docs", { p_shipment: shipmentId });
   if (error) {
     console.error("cha_approve_docs_failed", { code: error.code });
-    return { ok: false, error: "Could not save — please try again." };
+    // The RPC RAISEs this when the exporter hasn't approved the documents yet.
+    // Map it to a clear line for the broker; never surface the raw DB error.
+    const friendly = (error.message ?? "").includes("customer approval required")
+      ? "The exporter hasn't approved these documents yet — you can approve once they do."
+      : "Could not save — please try again.";
+    return { ok: false, error: friendly };
   }
   revalidatePath(`/cha/${shipmentId}`);
   revalidatePath("/cha");

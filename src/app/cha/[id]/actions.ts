@@ -42,7 +42,12 @@ export async function chaMarkFiled(shipmentId: string, note: string): Promise<Re
   });
   if (error) {
     console.error("cha_mark_filed_failed", { code: error.code });
-    return { ok: false, error: "Could not save — please try again." };
+    // The RPC RAISEs this when the exporter hasn't approved the documents yet.
+    // Map it to a clear line for the broker; never surface the raw DB error.
+    const friendly = (error.message ?? "").includes("customer approval required")
+      ? "This shipment isn't approved by the exporter yet — filing can't be recorded until they approve the documents."
+      : "Could not save — please try again.";
+    return { ok: false, error: friendly };
   }
   await notifyExporter(
     shipmentId,

@@ -181,6 +181,15 @@ async function downloadTwilioMedia(url: string): Promise<{ bytes: Buffer; conten
   });
       return null;
     }
+    // Reject an oversized file BEFORE reading it into memory — mirror the email
+    // path's size-first check (fetchInboundAttachment). Content-Length is advisory
+    // (Twilio usually sends it); if it's absent, fall through to the post-download
+    // size check below so media intake never breaks.
+    const declaredLength = parseInt(res.headers.get("content-length") ?? "", 10);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_FILE_SIZE_BYTES) {
+      console.error("media_download_failed", { stage: "too_large_header", length: declaredLength });
+      return null;
+    }
     const contentType = res.headers.get("content-type") ?? "application/octet-stream";
     const arrayBuffer = await res.arrayBuffer();
     const bytes = Buffer.from(arrayBuffer);
@@ -391,7 +400,11 @@ function isDeclineMessage(body: string): boolean {
 // approve/change decision — not a general chat message. Returns a reply string
 // when it handled the message, or null if nothing is pending (so the caller
 // falls through to normal chat). Never logs the message body (may contain PII).
-async function handleApprovalReply(customerId: string, body: string): Promise<string | null> {
+async function handleApprovalReply(
+  customerId: string,
+  body: string,
+  messageSid?: string
+): Promise<string | null> {
   const supabase = createSupabaseServerClient();
 
   const { data: shipment } = await supabase
@@ -465,6 +478,10 @@ async function handleApprovalReply(customerId: string, body: string): Promise<st
       new_value: {
         approved_by: "customer",
         approval_message: message,
+        // The Twilio message id of the approval reply — there's no dedicated
+        // column, so it lives on the immutable, hash-chained audit row as the
+        // durable proof of WHICH inbound message approved.
+        message_sid: messageSid || null,
         documents_approved: approvedCount,
         status_changed_to: "awaiting_goods_ready",
       },
@@ -1151,6 +1168,11 @@ async function handleTrackingReply(customerId: string, body: string): Promise<st
   return `📍 Got your update on ${ref} — reading it now, I'll send the status in a moment.`;
 }
 
+// The pending-gate reply handlers share this shape so the routing loops can pass
+// the inbound Twilio MessageSid through to whichever one handles the message (only
+// the approval handler records it).
+type PendingReplyHandler = (customerId: string, body: string, messageSid?: string) => Promise<string | null>;
+
 export async function POST(req: NextRequest) {
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
   const configuredUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
@@ -1190,6 +1212,9 @@ export async function POST(req: NextRequest) {
   const from = params.From ?? "";
   const body = (params.Body ?? "").trim();
   const numMedia = parseInt(params.NumMedia ?? "0", 10);
+  // Twilio's id for THIS inbound message — recorded on the approval audit row so
+  // an approval traces to the exact message that authorised it (no PII).
+  const messageSid = params.MessageSid ?? "";
 
   console.log("webhook_received", {
     hasFrom: !!from,
@@ -1322,7 +1347,7 @@ export async function POST(req: NextRequest) {
       // "yes/confirm" answers the customer's MOST RECENT gate. Each gate handler
       // only fires on its own status, so this ordering is purely about which to
       // try first when several gates are pending for one customer at once.
-      const affirmativeHandlers =
+      const affirmativeHandlers: PendingReplyHandler[] =
         gate === "awaiting_customer_info"
           ? [handleGapFillReply, handleApprovalReply, handleGoodsReadyReply, handleOrderConfirmReply, handleVerifyReply]
           : gate === "awaiting_customer_verify"
@@ -1333,7 +1358,7 @@ export async function POST(req: NextRequest) {
                 ? [handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply, handleVerifyReply]
                 : [handleApprovalReply, handleGoodsReadyReply, handleOrderConfirmReply, handleVerifyReply];
       for (const handler of affirmativeHandlers) {
-        const reply = await handler(customerId, body);
+        const reply = await handler(customerId, body, messageSid);
         if (reply) return twimlResponse(reply);
       }
       const gapFillReply = await handleGapFillReply(customerId, body);
@@ -1346,12 +1371,12 @@ export async function POST(req: NextRequest) {
       // code) — run verify FIRST so a competing awaiting-info shipment can't swallow
       // it. Order-confirm stays LAST so a bare "no" can't cancel a different order.
       const gate = await newestAffirmativeGate(customerId);
-      const handlers =
+      const handlers: PendingReplyHandler[] =
         gate === "awaiting_customer_verify"
           ? [handleVerifyReply, handleGapFillReply, handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply]
           : [handleGapFillReply, handleVerifyReply, handleGoodsReadyReply, handleApprovalReply, handleOrderConfirmReply];
       for (const handler of handlers) {
-        const reply = await handler(customerId, body);
+        const reply = await handler(customerId, body, messageSid);
         if (reply) return twimlResponse(reply);
       }
     }

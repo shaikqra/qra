@@ -12,6 +12,7 @@ const FIELD_LABELS: Record<string, string> = {
   buyer_name: "Buyer",
   product_description: "Goods",
   quantity: "Quantity",
+  quantity_unit: "Quantity unit",
   value_amount: "Invoice value",
   unit_price: "Unit price",
   value_currency: "Currency",

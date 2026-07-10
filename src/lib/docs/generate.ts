@@ -9,6 +9,7 @@ import { buildLcCoverPdf } from "@/lib/pdf/lc-cover";
 import { DOC_LABELS } from "@/lib/docs/send-to-cha-core";
 import { isEuDestination } from "@/lib/docs/destinations";
 import { readDraftedFields } from "@/lib/docs/verify-gate";
+import { writeAudit } from "@/lib/audit";
 
 // Shared document-generation engine. Called by the dashboard buttons
 // (generatedBy = operator id) and by the WhatsApp auto-pipeline
@@ -117,6 +118,18 @@ async function storeDocument(opts: {
     return { ok: false, error: `Record failed: ${insErr.message}` };
   }
 
+  // Chain the generation EVENT into the tamper-evident audit trail. The immutable
+  // generated_documents row is the artifact; this puts the event (with its content
+  // hash) in the hash chain so "every doc is hash-chained" holds. Best-effort —
+  // writeAudit never throws and a failed audit must not block the document.
+  await writeAudit(admin, {
+    operator_id: opts.generatedBy,
+    shipment_id: opts.shipmentId,
+    action_type: "note",
+    old_value: null,
+    new_value: { event: "document_generated", doc_type: opts.docType, storage_path: storagePath, sha256 },
+  });
+
   const { data: signed } = await admin.storage
     .from("generated-docs")
     .createSignedUrl(storagePath, 60 * 10);
@@ -142,6 +155,9 @@ async function generateInvoiceVariantCore(
     ["buyer_name", "Buyer name"],
     ["product_description", "Product description"],
     ["quantity", "Quantity"],
+    // The unit is required alongside the quantity (kept in sync with
+    // REQUIRED_FIELD_LABELS) — a bare number can't print as the UQC.
+    ["quantity_unit", "Quantity unit"],
     ["value_amount", "Invoice value"],
     ["value_currency", "Currency"],
   ];
@@ -181,6 +197,7 @@ async function generateInvoiceVariantCore(
     containerNo: get("container_no") || undefined,
     sealNo: get("seal_no") || undefined,
     hsCode: get("hs_code"),
+    hsCodeDrafted: readDraftedFields(d).includes("hs_code"),
     productDescription: get("product_description"),
     quantity: get("quantity"),
     unit: get("quantity_unit"),

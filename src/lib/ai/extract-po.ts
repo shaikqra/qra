@@ -31,6 +31,8 @@ export const PO_FIELD_KEYS = [
   "seal_no",
   "batch_code",
   "lot_code",
+  "po_date",
+  "shipment_deadline",
 ] as const;
 
 export type PoFields = Record<(typeof PO_FIELD_KEYS)[number], string>;
@@ -63,6 +65,8 @@ const FIELD_DESCRIPTIONS: Record<(typeof PO_FIELD_KEYS)[number], string> = {
   seal_no: "Seal number, as printed",
   batch_code: "Batch / production code, as printed",
   lot_code: "Lot number, as printed",
+  po_date: "The PO / order date, as ISO YYYY-MM-DD. Only if a date is explicitly stated; never infer. Else blank",
+  shipment_deadline: "The latest shipment / delivery deadline (last date to ship/deliver), as ISO YYYY-MM-DD. Only if explicitly stated; never infer. Else blank",
 };
 
 export type SupportedMediaType =

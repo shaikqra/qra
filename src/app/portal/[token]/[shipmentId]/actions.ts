@@ -18,7 +18,7 @@ type Result = { ok: true } | { ok: false; error: string };
 // The fields the verify gate can flag — the only ones a console correction may
 // touch (a reply can't rewrite an arbitrary field). Mirrors FIELD_LABELS.
 const ALLOWED_VERIFY_FIELDS = new Set([
-  "buyer_name", "product_description", "quantity", "value_amount", "unit_price", "value_currency",
+  "buyer_name", "product_description", "quantity", "quantity_unit", "value_amount", "unit_price", "value_currency",
   "incoterm", "hs_code", "destination_country", "number_of_packages", "package_type", "net_weight", "gross_weight",
 ]);
 

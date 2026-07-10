@@ -24,7 +24,10 @@ const GOODS_VALUE_INCOTERMS = new Set(["EXW", "FCA", "FAS", "FOB"]);
 // snapshot is exempt from the ambiguity + reconciliation flags — they vouched for
 // it as-is — while a CHANGED value (≠ snapshot) re-validates. Stored under the
 // reserved key "_verify_confirmed", like _confidence / _drafted / _needed.
-const CONFIRMABLE_NUMERIC = ["quantity", "value_amount", "unit_price", "net_weight", "gross_weight"] as const;
+// quantity_unit is included (though not numeric) so an exporter can CONFIRM a
+// legitimate-but-uncommon unit past the known-unit check in one pass, instead of
+// looping the gate — the same escape valve the numeric confirm cases use.
+const CONFIRMABLE_NUMERIC = ["quantity", "value_amount", "unit_price", "net_weight", "gross_weight", "quantity_unit"] as const;
 
 function readVerifyConfirmed(d: Record<string, string>): Record<string, string> {
   try {
@@ -57,6 +60,9 @@ const CONFIDENCE_THRESHOLDS: Record<string, number> = {
   net_weight: 0.9,
   gross_weight: 0.9,
   buyer_name: 0.85,
+  // HS drives duty + RoDTEP + customs classification, so a misread must be
+  // verified — held to the same elevated bar as the money/quantity fields.
+  hs_code: 0.9,
 };
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.75;
 
@@ -192,6 +198,20 @@ export function validateExtracted(d: Record<string, string>): ValidationIssue[] 
     issues.push({ field: "value_currency", reason: "Currency is not a 3-letter code" });
   }
 
+  // Quantity UNIT must actually look like a unit — a bare number or symbols
+  // ("1000" of WHAT) can't ride onto a customs document. Any WORD unit passes
+  // (kg, MT, pcs, bags, cartons, drums… — trade units vary too much for an
+  // allowlist, and mapping to the official UQC is the CHA's call, not ours);
+  // only a unit with no letters at all is flagged. Exempt one the exporter
+  // already confirmed as-is, so it doesn't loop the verify gate.
+  const qtyUnit = get("quantity_unit");
+  if (qtyUnit && !/[a-zA-Z]/.test(qtyUnit) && confirmed["quantity_unit"] !== qtyUnit) {
+    issues.push({
+      field: "quantity_unit",
+      reason: `Quantity unit "${qtyUnit}" doesn't look like a unit — reply with the unit your PO uses (kg, MT, pcs, bags, cartons…)`,
+    });
+  }
+
   // Incoterms are usually written with a place ("CIF Rotterdam") — validate
   // the code itself, the first word only.
   const incoterm = get("incoterm");
@@ -200,13 +220,32 @@ export function validateExtracted(d: Record<string, string>): ValidationIssue[] 
     issues.push({ field: "incoterm", reason: `Incoterm "${incoterm}" is not a recognised term` });
   }
 
+  // Indian customs filing (shipping bill) needs the 8-digit ITC-HS code. Buyer POs
+  // legitimately carry the 6-digit international HS, so this is flag-and-ask, not a
+  // hard reject: a present code that isn't exactly 8 digits (after stripping dots /
+  // spaces) asks the exporter for the full 8-digit code; a non-numeric code is a
+  // plain correction.
   const hs = get("hs_code");
-  if (hs && !/^\d{4,10}$/.test(hs.replace(/[.\s]/g, ""))) {
-    issues.push({ field: "hs_code", reason: "HS code should be 4-10 digits" });
+  if (hs) {
+    const hsDigits = hs.replace(/[.\s]/g, "");
+    if (!/^\d+$/.test(hsDigits)) {
+      issues.push({ field: "hs_code", reason: "HS code should be digits only" });
+    } else if (hsDigits.length !== 8) {
+      issues.push({
+        field: "hs_code",
+        reason: `Indian customs filing needs the 8-digit ITC-HS code — this looks like ${hsDigits.length} digits; reply with the full 8-digit code`,
+      });
+    }
   }
 
   return issues;
 }
+
+// Optional, display-only fields: never allowed to gate a shipment. A date the
+// model wasn't sure about (e.g. an ambiguous DD/MM/YYYY it reformatted) shows
+// as-is for the exporter/CHA to eyeball — blocking document generation over an
+// informational field would be worse than the uncertainty itself.
+const CONFIDENCE_EXEMPT = new Set(["po_date", "shipment_deadline"]);
 
 // Fields whose extraction confidence is below threshold — they may be right,
 // but the agent is not allowed to act on them without a human look.
@@ -216,6 +255,7 @@ export function lowConfidenceFields(
 ): string[] {
   const flagged: string[] = [];
   for (const [key, c] of Object.entries(confidence)) {
+    if (CONFIDENCE_EXEMPT.has(key)) continue;
     const value = (d[key] ?? "").trim();
     if (!value) continue; // blank fields are gap-fill's job
     const threshold = CONFIDENCE_THRESHOLDS[key] ?? DEFAULT_CONFIDENCE_THRESHOLD;

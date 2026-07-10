@@ -414,6 +414,8 @@ export default async function PortalShipment({
               <Detail k="Value" v={`${f(ed, "value_currency")} ${f(ed, "value_amount")}`.trim()} />
               <Detail k="Incoterm" v={f(ed, "incoterm")} />
               <Detail k="Destination" v={f(ed, "port_of_discharge")} />
+              <Detail k="PO date" v={f(ed, "po_date")} />
+              <Detail k="Ship by" v={f(ed, "shipment_deadline")} />
             </div>
           </section>
 

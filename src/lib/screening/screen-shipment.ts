@@ -8,6 +8,13 @@ const SCREENING_SCOPE = {
   screened_parties: "buyer, consignee, notify-party (when named)",
   lists: "US Consolidated Screening List (~13 US lists incl. OFAC SDN) + UN Security Council Consolidated List + EU Consolidated Financial Sanctions List",
   not_screened: ["India DGFT/SCOMET", "freight forwarder", "carrier", "vessel", "bank"],
+  // The residual risk, recorded honestly so a "clear" is never read as more
+  // certain than it is: matching is NAME-ONLY (no date-of-birth, address, or
+  // nationality disambiguation), so a common-name collision reads as a hit while a
+  // true match under an alias/transliteration can be missed. Local UN/EU lists are
+  // matched by trigram similarity at a 0.45 threshold; US CSL uses the provider's
+  // own fuzzy_name search.
+  method: "name-only fuzzy match, no DOB/address/nationality disambiguation; local lists trigram similarity >= 0.45, US CSL provider fuzzy_name",
 };
 
 export type ShipmentParty = { role: string; name: string };

@@ -86,6 +86,7 @@ export async function checkLcAction(shipmentId: string, lcText: string): Promise
     ["Amount", [g("value_currency"), g("value_amount")].filter(Boolean).join(" ")],
     ["Incoterm", g("incoterm")],
     ["HS code", g("hs_code")],
+    ["Latest shipment / delivery deadline (from the PO)", g("shipment_deadline")],
     ["Port of loading", g("port_of_loading")],
     ["Port of discharge", g("port_of_discharge")],
     ["Net weight", g("net_weight")],

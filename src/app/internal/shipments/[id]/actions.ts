@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseAuthClient, getOperatorSession } from "@/lib/supabase/auth";
 import { screenShipmentParties, partiesFromExtracted } from "@/lib/screening/screen-shipment";
+import { writeAudit } from "@/lib/audit";
 
 const PARTY_KEYS = ["buyer_name", "consignee_name", "notify_party_name"];
 
@@ -159,6 +160,17 @@ export async function saveShipmentExtraction(
           .from("shipments")
           .update({ status: "sanctions_screening" })
           .eq("id", input.shipmentId);
+        // The forced move overrides the status the operator picked, so record it —
+        // otherwise the audit trail's last status_change lags the live column.
+        if (input.status !== "sanctions_screening") {
+          await writeAudit(supabase, {
+            operator_id: session.userId,
+            shipment_id: input.shipmentId,
+            action_type: "status_change",
+            old_value: { status: input.status },
+            new_value: { status: "sanctions_screening" },
+          });
+        }
       }
     } catch {
       // On a THROWN screening failure we can't vouch for the new party, so fail
@@ -172,6 +184,17 @@ export async function saveShipmentExtraction(
           .from("shipments")
           .update({ status: "sanctions_screening" })
           .eq("id", input.shipmentId);
+        // Same fail-closed override as the flagged branch — audit the forced move
+        // so the trail's last status doesn't lag the live column.
+        if (input.status !== "sanctions_screening") {
+          await writeAudit(supabase, {
+            operator_id: session.userId,
+            shipment_id: input.shipmentId,
+            action_type: "status_change",
+            old_value: { status: input.status },
+            new_value: { status: "sanctions_screening" },
+          });
+        }
       }
     }
   }

@@ -35,6 +35,7 @@ export type CommercialInvoiceData = {
   sealNo?: string;
 
   hsCode: string;
+  hsCodeDrafted?: boolean;
   productDescription: string;
   quantity: string;
   unit: string;
@@ -284,6 +285,13 @@ export async function buildCommercialInvoicePdf(data: CommercialInvoiceData): Pr
   if (weights) {
     y -= 12;
     text(weights, COL_DESC, y, 8, font, GREY);
+  }
+  // A Qra-drafted HS code is marked as a draft the CHA must confirm — the HS
+  // column is too narrow for the marker, so it prints as a note under the line
+  // item, mirroring the honesty every other document applies.
+  if (data.hsCodeDrafted && data.hsCode) {
+    y -= 12;
+    text(`HS code ${data.hsCode} is a Qra draft — CHA to confirm.`, COL_DESC, y, 8, font, GREY);
   }
   y -= 14;
   rule(y);
