@@ -6,6 +6,7 @@ import { resolveCustomerByPortalToken, portalRateLimited } from "@/lib/portal/au
 import { portalActionHint, portalStageIndex } from "@/lib/portal/stages";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { verifyFieldLines, readStoredConfidence, readDraftedFields, fieldLabel, verifyKeys } from "@/lib/docs/verify-gate";
+import { missingRequiredFields, REQUIRED_FIELD_LABELS } from "@/lib/docs/required-fields";
 import { isExporterVisibleDoc } from "@/lib/docs/doc-visibility";
 import { toActivities } from "@/lib/shipment-activity";
 import { loadRankedFreight } from "@/lib/freight/load";
@@ -309,6 +310,19 @@ export default async function PortalShipment({
     }));
   }
 
+  // Gap-fill gate (awaiting_customer_info): the exact required fields Qra couldn't
+  // read from the PO, surfaced as editable inputs so the exporter can supply them
+  // in the console. Same shape as verifyFields; values start blank (they're missing).
+  let infoFields: { key: string; label: string; value: string }[] = [];
+  if (ship.status === "awaiting_customer_info") {
+    const ed2 = (ed ?? {}) as Record<string, string>;
+    infoFields = missingRequiredFields(ed2).map((k) => ({
+      key: k,
+      label: REQUIRED_FIELD_LABELS[k] ?? k,
+      value: (ed2[k] ?? "").trim(),
+    }));
+  }
+
   // If the CHA bounced the docs back for a change, the approve gate reopens —
   // surface their note so the exporter knows WHY, not just "approve again".
   const chaChangeNote =
@@ -324,6 +338,7 @@ export default async function PortalShipment({
         status={ship.status}
         verifyLines={verifyLines}
         verifyFields={verifyFields}
+        infoFields={infoFields}
         infoHint={ship.status === "awaiting_customer_info" ? hint : null}
         chaChangeNote={chaChangeNote}
       />

@@ -8,6 +8,7 @@ import {
   portalApproveDocs,
   portalCloseShipment,
   portalVerifyOrder,
+  portalProvideInfo,
   portalConfirmGoodsReady,
 } from "./actions";
 
@@ -15,6 +16,7 @@ const CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered
 
 type Result = { ok: true } | { ok: false; error: string };
 type VerifyField = { key: string; label: string; value: string; drafted: boolean };
+type InfoField = { key: string; label: string; value: string };
 type Gate = {
   kind: "confirm" | "verify" | "approve" | "goods" | "close" | "info";
   title: string;
@@ -69,6 +71,7 @@ export function GateActions({
   status,
   verifyLines = [],
   verifyFields = [],
+  infoFields = [],
   infoHint = null,
   chaChangeNote = null,
 }: {
@@ -77,6 +80,7 @@ export function GateActions({
   status: string;
   verifyLines?: string[];
   verifyFields?: VerifyField[];
+  infoFields?: InfoField[];
   infoHint?: string | null;
   chaChangeNote?: string | null;
 }) {
@@ -85,7 +89,7 @@ export function GateActions({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
   const [vals, setVals] = useState<Record<string, string>>(() =>
-    Object.fromEntries(verifyFields.map((f) => [f.key, f.value]))
+    Object.fromEntries([...verifyFields, ...infoFields].map((f) => [f.key, f.value]))
   );
 
   const gate = gateFor(status, infoHint);
@@ -121,6 +125,17 @@ export function GateActions({
     run(() => portalVerifyOrder(token, shipmentId, has ? corrections : undefined));
   }
 
+  // Gap-fill gate: send the missing required values the exporter typed (blanks
+  // dropped — the server re-checks completeness before advancing).
+  function submitInfo() {
+    const provided: Record<string, string> = {};
+    for (const f of infoFields) {
+      const v = (vals[f.key] ?? "").trim();
+      if (v) provided[f.key] = v;
+    }
+    run(() => portalProvideInfo(token, shipmentId, provided));
+  }
+
   const accentBtn = chaChange
     ? "bg-amber-600 hover:bg-amber-700"
     : {
@@ -143,6 +158,7 @@ export function GateActions({
       }[gate.kind];
 
   const changed = verifyFields.some((f) => (vals[f.key] ?? "").trim() !== f.value);
+  const infoFilled = infoFields.some((f) => (vals[f.key] ?? "").trim() !== "");
 
   return (
     <>
@@ -200,6 +216,23 @@ export function GateActions({
                       value={vals[f.key] ?? ""}
                       onChange={(e) => setVals((s) => ({ ...s, [f.key]: e.target.value }))}
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {gate.kind === "info" && infoFields.length > 0 && (
+              <div className="mt-3 space-y-3">
+                {infoFields.map((f) => (
+                  <label key={f.key} className="block">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      {f.label}
+                    </span>
+                    <input
+                      value={vals[f.key] ?? ""}
+                      onChange={(e) => setVals((s) => ({ ...s, [f.key]: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none"
                     />
                   </label>
                 ))}
@@ -278,12 +311,21 @@ export function GateActions({
                 </button>
               )}
               {gate.kind === "info" && (
-                <button
-                  onClick={() => setOpen(false)}
-                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  Got it — I&apos;ll reply on WhatsApp
-                </button>
+                <>
+                  <button
+                    disabled={pending || !infoFilled}
+                    onClick={submitInfo}
+                    className={`flex-1 rounded-lg ${accentBtn} px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60`}
+                  >
+                    {pending ? "Working…" : "Submit details"}
+                  </button>
+                  <button
+                    onClick={() => setOpen(false)}
+                    className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    or reply on WhatsApp
+                  </button>
+                </>
               )}
             </div>
 

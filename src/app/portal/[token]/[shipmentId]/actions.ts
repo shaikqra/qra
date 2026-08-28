@@ -9,6 +9,7 @@ import { autoSendChaIfEnabled } from "@/lib/docs/send-to-cha-core";
 import { generateProformaInvoiceCore, generateCertificateOfOriginCore, IDENTITY_REQUIRED_ERROR } from "@/lib/docs/generate";
 import { validateExtracted, verifyConfirmedSnapshot } from "@/lib/docs/validate";
 import { readDraftedFields, readNeededFields, readStoredConfidence } from "@/lib/docs/verify-gate";
+import { missingRequiredFields, labelsFor, REQUIRED_FIELD_LABELS } from "@/lib/docs/required-fields";
 import { notifyCustomerWhatsApp } from "@/lib/whatsapp/notify";
 import { negotiateTargetFor } from "@/lib/freight/rank-quotes";
 import { writeAudit } from "@/lib/audit";
@@ -188,6 +189,102 @@ export async function portalVerifyOrder(
       extract: () => loadStoredExtraction(shipmentId),
       skipLowConfidence: true,
     });
+  });
+
+  revalidatePath(`/portal/${token}/${shipmentId}`);
+  return { ok: true };
+}
+
+// Gap-fill gate (awaiting_customer_info): the exporter supplies the required PO
+// fields Qra couldn't read, right here in the console instead of only on WhatsApp.
+// Mirrors the WhatsApp handleGapFillReply + finishAndGenerate path exactly: merge
+// the supplied values under a status-guarded, atomic RPC, and — only once every
+// required field is present — claim the transition and resume the FULL pipeline.
+// CRITICAL: it does NOT skip the low-confidence check on resume, so an ambiguous
+// value the exporter just typed (e.g. "25.155") is still caught by the trust/verify
+// gate afterwards, exactly like the WhatsApp gap-fill.
+export async function portalProvideInfo(
+  token: string,
+  shipmentId: string,
+  values: Record<string, string>
+): Promise<Result> {
+  if (portalWriteRateLimited(`act:${token}`)) return { ok: false, error: "Please wait a moment and try again." };
+  const auth = await authorize(token, shipmentId, "awaiting_customer_info");
+  if (!auth) return { ok: false, error: "This order can't be updated right now." };
+
+  const admin = createSupabaseServerClient();
+
+  // Current data, so we can tell what's STILL missing after the exporter's entries
+  // (never trust the client to say the shipment is complete).
+  const { data: ship } = await admin
+    .from("shipments")
+    .select("extracted_data")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  const current = (ship?.extracted_data ?? {}) as Record<string, string>;
+
+  // Allow-list: only the required fields the gap-fill gate asks for. values is
+  // client JSON, so reject any unknown/reserved key and any non-string value, trim,
+  // and ignore blanks — a reply can't rewrite an arbitrary or reserved field.
+  const patch: Record<string, string> = {};
+  for (const [k, raw] of Object.entries(values)) {
+    if (!Object.prototype.hasOwnProperty.call(REQUIRED_FIELD_LABELS, k) || typeof raw !== "string") continue;
+    const v = raw.trim();
+    if (v) patch[k] = v;
+  }
+  const filled = Object.keys(patch);
+  if (filled.length === 0) return { ok: false, error: "Please enter the requested details." };
+
+  // Atomic shallow merge, status-guarded so a stale/duplicate submit (or a
+  // simultaneous WhatsApp reply) can't fill a shipment that already left the gate,
+  // and a concurrent write to any other key is preserved.
+  await admin.rpc("merge_extracted_data", {
+    p_shipment_id: shipmentId,
+    p_patch: patch,
+    p_expected_status: "awaiting_customer_info",
+  });
+  await writeAudit(admin, {
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "extract",
+    old_value: null,
+    new_value: { event: "info_provided", via: "portal", fields: filled },
+  });
+
+  // Still short a required field? Leave the gate open and say what's left — mirrors
+  // the WhatsApp "Thanks — noted; I still need…" reply. Don't advance the pipeline.
+  const stillMissing = missingRequiredFields({ ...current, ...patch });
+  if (stillMissing.length > 0) {
+    return { ok: false, error: `Still needed: ${labelsFor(stillMissing).join(", ")}.` };
+  }
+
+  // Complete — claim the transition once so a double-tap (or a simultaneous WhatsApp
+  // reply) can't double-run the pipeline.
+  const { data: claimed } = await admin
+    .from("shipments")
+    .update({ status: "data_extracting" })
+    .eq("id", shipmentId)
+    .eq("status", "awaiting_customer_info")
+    .select("id");
+  if (!claimed || claimed.length === 0) return { ok: true }; // already moving
+
+  await writeAudit(admin, {
+    operator_id: null,
+    shipment_id: shipmentId,
+    action_type: "approve",
+    old_value: { status: "awaiting_customer_info" },
+    new_value: { event: "info_completed", provided_by: "customer", via: "portal" },
+  });
+
+  after(async () => {
+    await notifyCustomerWhatsApp(
+      admin,
+      auth.customerId,
+      `✅ That's everything for ${auth.referenceNumber} — thank you! I'm preparing your draft documents now; they'll arrive here shortly.`
+    );
+    // No skipLowConfidence — the trust/verify gate must still run on the freshly
+    // typed values (an ambiguous number must still be caught), like WhatsApp.
+    await runAutoPipeline({ shipmentId, extract: () => loadStoredExtraction(shipmentId) });
   });
 
   revalidatePath(`/portal/${token}/${shipmentId}`);
