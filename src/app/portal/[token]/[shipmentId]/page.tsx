@@ -7,6 +7,7 @@ import { portalActionHint, portalStageIndex } from "@/lib/portal/stages";
 import { validateExtracted, lowConfidenceFields } from "@/lib/docs/validate";
 import { verifyFieldLines, readStoredConfidence, readDraftedFields, fieldLabel, verifyKeys } from "@/lib/docs/verify-gate";
 import { missingRequiredFields, REQUIRED_FIELD_LABELS } from "@/lib/docs/required-fields";
+import { computeProposedValue } from "@/lib/docs/compute-value";
 import { isExporterVisibleDoc } from "@/lib/docs/doc-visibility";
 import { toActivities } from "@/lib/shipment-activity";
 import { loadRankedFreight } from "@/lib/freight/load";
@@ -313,13 +314,27 @@ export default async function PortalShipment({
   // Gap-fill gate (awaiting_customer_info): the exact required fields Qra couldn't
   // read from the PO, surfaced as editable inputs so the exporter can supply them
   // in the console. Same shape as verifyFields; values start blank (they're missing).
-  let infoFields: { key: string; label: string; value: string }[] = [];
+  // If the missing invoice value is cleanly computable from the PO's quantity ×
+  // unit-price, attach that proposal so the console pre-fills it — parity with the
+  // WhatsApp gap message. computeProposedValue returns null on any ambiguity, in
+  // which case the field stays a plain empty ask (no guess).
+  let infoFields: {
+    key: string;
+    label: string;
+    value: string;
+    proposal?: { amount: string; note: string };
+  }[] = [];
   if (ship.status === "awaiting_customer_info") {
     const ed2 = (ed ?? {}) as Record<string, string>;
-    infoFields = missingRequiredFields(ed2).map((k) => ({
+    const missing = missingRequiredFields(ed2);
+    const computed = missing.includes("value_amount") ? computeProposedValue(ed2) : null;
+    infoFields = missing.map((k) => ({
       key: k,
       label: REQUIRED_FIELD_LABELS[k] ?? k,
       value: (ed2[k] ?? "").trim(),
+      ...(k === "value_amount" && computed
+        ? { proposal: { amount: computed.amount, note: computed.explanation } }
+        : {}),
     }));
   }
 

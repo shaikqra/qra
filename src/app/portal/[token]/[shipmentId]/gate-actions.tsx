@@ -16,7 +16,12 @@ const CLOSEABLE = ["filed_with_cha", "customs_cleared", "in_transit", "delivered
 
 type Result = { ok: true } | { ok: false; error: string };
 type VerifyField = { key: string; label: string; value: string; drafted: boolean };
-type InfoField = { key: string; label: string; value: string };
+type InfoField = {
+  key: string;
+  label: string;
+  value: string;
+  proposal?: { amount: string; note: string };
+};
 type Gate = {
   kind: "confirm" | "verify" | "approve" | "goods" | "close" | "info";
   title: string;
@@ -89,7 +94,12 @@ export function GateActions({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
   const [vals, setVals] = useState<Record<string, string>>(() =>
-    Object.fromEntries([...verifyFields, ...infoFields].map((f) => [f.key, f.value]))
+    Object.fromEntries([
+      ...verifyFields.map((f) => [f.key, f.value] as const),
+      // Info fields with a computed proposal start pre-filled with that amount so
+      // the exporter can confirm with one tap; the rest start blank as before.
+      ...infoFields.map((f) => [f.key, f.proposal?.amount ?? f.value] as const),
+    ])
   );
 
   const gate = gateFor(status, infoHint);
@@ -234,6 +244,11 @@ export function GateActions({
                       onChange={(e) => setVals((s) => ({ ...s, [f.key]: e.target.value }))}
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none"
                     />
+                    {f.proposal && (
+                      <span className="mt-1 block text-[11px] text-slate-400">
+                        Qra calculated this from {f.proposal.note} — confirm or edit.
+                      </span>
+                    )}
                   </label>
                 ))}
               </div>
